@@ -1,0 +1,57 @@
+# Byte-compiled / optimized
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Tests / coverage
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+.hypothesis/
+.pytest_cache/
+
+# Environments
+.env
+.env.local
+.venv
+env/
+venv/
+ENV/
+
+# Azure Functions — secretos y artefactos locales
+local.settings.json
+bin/
+obj/
+appsettings.json
+__blobstorage__
+__queuestorage__
+__azurite_db*__.json
+.python_packages
+
+# Datos de producción — nunca versionar
+imgs/
+debug/
+debug_claude/
+fichasEstadisticas/
+debugging.txt
+
+# Catálogos CRM en bruto (XLSX con datos reales)
+centros/centrosTablasCRM/
+centros/centrosCompletosAntiguos/
+
+# Snapshots de depuración (pueden contener datos personales)
+*.snapshot.json
+
+# Editor / OS
+.vscode/
+.DS_Store
+*.log

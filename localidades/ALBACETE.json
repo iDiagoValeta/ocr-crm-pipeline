@@ -1,0 +1,524 @@
+[
+  {
+    "Name": "ABENGIBRE",
+    "Name_cat": "ABENGIBRE",
+    "IdCity": "00000000-0000-0000-0000-000000000033",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "ALATOZ",
+    "Name_cat": "ALATOZ",
+    "IdCity": "00000000-0000-0000-0000-000000007299",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "ALBACETE",
+    "Name_cat": "ALBACETE",
+    "IdCity": "00000000-0000-0000-0000-000000000003",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "ALBATANA",
+    "Name_cat": "ALBATANA",
+    "IdCity": "00000000-0000-0000-0000-000000000168",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "ALBOREA",
+    "Name_cat": "ALBOREA",
+    "IdCity": "00000000-0000-0000-0000-000000000156",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "ALCADOZO",
+    "Name_cat": "ALCADOZO",
+    "IdCity": "00000000-0000-0000-0000-000000007300",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "ALCALÁ DEL JÚCAR",
+    "Name_cat": "ALCALÁ DEL JÚCAR",
+    "IdCity": "00000000-0000-0000-0000-000000000170",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "ALCARAZ",
+    "Name_cat": "ALCARAZ",
+    "IdCity": "00000000-0000-0000-0000-000000000035",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "ALMANSA",
+    "Name_cat": "ALMANSA",
+    "IdCity": "00000000-0000-0000-0000-000000000031",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "ALPERA",
+    "Name_cat": "ALPERA",
+    "IdCity": "00000000-0000-0000-0000-000000000037",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "AYNA",
+    "Name_cat": "AYNA",
+    "IdCity": "00000000-0000-0000-0000-000000007301",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "BALAZOTE",
+    "Name_cat": "BALAZOTE",
+    "IdCity": "00000000-0000-0000-0000-000000000039",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "BALLESTERO",
+    "Name_cat": "BALLESTERO, EL",
+    "IdCity": "00000000-0000-0000-0000-000000007302",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "BALSA DE VES",
+    "Name_cat": "BALSA DE VES",
+    "IdCity": "00000000-0000-0000-0000-000000007303",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "BARRAX",
+    "Name_cat": "BARRAX",
+    "IdCity": "00000000-0000-0000-0000-000000000041",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "BIENSERVIDA",
+    "Name_cat": "BIENSERVIDA",
+    "IdCity": "00000000-0000-0000-0000-000000007304",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "BOGARRA",
+    "Name_cat": "BOGARRA",
+    "IdCity": "00000000-0000-0000-0000-000000000018",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "BONETE",
+    "Name_cat": "BONETE",
+    "IdCity": "00000000-0000-0000-0000-000000000175",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "BONILLO",
+    "Name_cat": "BONILLO, EL",
+    "IdCity": "00000000-0000-0000-0000-000000000027",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "CARCELÉN",
+    "Name_cat": "CARCELÉN",
+    "IdCity": "00000000-0000-0000-0000-000000000262",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "CASAS DE JUAN NÚÑEZ",
+    "Name_cat": "CASAS DE JUAN NÚÑEZ",
+    "IdCity": "00000000-0000-0000-0000-000000000177",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "CASAS DE LÁZARO",
+    "Name_cat": "CASAS DE LÁZARO",
+    "IdCity": "00000000-0000-0000-0000-000000007305",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "CASAS DE VES",
+    "Name_cat": "CASAS DE VES",
+    "IdCity": "00000000-0000-0000-0000-000000000179",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "CASAS-IBÁÑEZ",
+    "Name_cat": "CASAS-IBÁÑEZ",
+    "IdCity": "00000000-0000-0000-0000-000000000087",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "CAUDETE",
+    "Name_cat": "CAUDETE",
+    "IdCity": "00000000-0000-0000-0000-000000000011",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "CENIZATE",
+    "Name_cat": "CENIZATE",
+    "IdCity": "00000000-0000-0000-0000-000000000044",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "CHINCHILLA DE MONTE-ARAGÓN",
+    "Name_cat": "CHINCHILLA DE MONTE-ARAGÓN",
+    "IdCity": "00000000-0000-0000-0000-000000000013",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "CORRAL-RUBIO",
+    "Name_cat": "CORRAL-RUBIO",
+    "IdCity": "00000000-0000-0000-0000-000000007306",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "COTILLAS",
+    "Name_cat": "COTILLAS",
+    "IdCity": "00000000-0000-0000-0000-000000007307",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "ELCHE DE LA SIERRA",
+    "Name_cat": "ELCHE DE LA SIERRA",
+    "IdCity": "00000000-0000-0000-0000-000000000047",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "FÉREZ",
+    "Name_cat": "FÉREZ",
+    "IdCity": "00000000-0000-0000-0000-000000000092",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "FUENSANTA",
+    "Name_cat": "FUENSANTA",
+    "IdCity": "00000000-0000-0000-0000-000000007308",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "FUENTE-ÁLAMO",
+    "Name_cat": "FUENTE-ÁLAMO",
+    "IdCity": "00000000-0000-0000-0000-000000000145",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "FUENTEALBILLA",
+    "Name_cat": "FUENTEALBILLA",
+    "IdCity": "00000000-0000-0000-0000-000000000126",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "GINETA",
+    "Name_cat": "GINETA, LA",
+    "IdCity": "00000000-0000-0000-0000-000000000286",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "GOLOSALVO",
+    "Name_cat": "GOLOSALVO",
+    "IdCity": "00000000-0000-0000-0000-000000007309",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "HELLÍN",
+    "Name_cat": "HELLÍN",
+    "IdCity": "00000000-0000-0000-0000-000000000049",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "HERRERA",
+    "Name_cat": "HERRERA, LA",
+    "IdCity": "00000000-0000-0000-0000-000000007310",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "HIGUERUELA",
+    "Name_cat": "HIGUERUELA",
+    "IdCity": "00000000-0000-0000-0000-000000000182",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "HOYA-GONZALO",
+    "Name_cat": "HOYA-GONZALO",
+    "IdCity": "00000000-0000-0000-0000-000000000184",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "JORQUERA",
+    "Name_cat": "JORQUERA",
+    "IdCity": "00000000-0000-0000-0000-000000007311",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "LETUR",
+    "Name_cat": "LETUR",
+    "IdCity": "00000000-0000-0000-0000-000000000306",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "LEZUZA",
+    "Name_cat": "LEZUZA",
+    "IdCity": "00000000-0000-0000-0000-000000000051",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "LIÉTOR",
+    "Name_cat": "LIÉTOR",
+    "IdCity": "00000000-0000-0000-0000-000000000269",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "MADRIGUERAS",
+    "Name_cat": "MADRIGUERAS",
+    "IdCity": "00000000-0000-0000-0000-000000000053",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "MAHORA",
+    "Name_cat": "MAHORA",
+    "IdCity": "00000000-0000-0000-0000-000000000200",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "MASEGOSO",
+    "Name_cat": "MASEGOSO",
+    "IdCity": "00000000-0000-0000-0000-000000007312",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "MINAYA",
+    "Name_cat": "MINAYA",
+    "IdCity": "00000000-0000-0000-0000-000000000134",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "MOLINICOS",
+    "Name_cat": "MOLINICOS",
+    "IdCity": "00000000-0000-0000-0000-000000000370",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "MONTALVOS",
+    "Name_cat": "MONTALVOS",
+    "IdCity": "00000000-0000-0000-0000-000000007313",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "MONTEALEGRE DEL CASTILLO",
+    "Name_cat": "MONTEALEGRE DEL CASTILLO",
+    "IdCity": "00000000-0000-0000-0000-000000000188",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "MOTILLEJA",
+    "Name_cat": "MOTILLEJA",
+    "IdCity": "00000000-0000-0000-0000-000000007314",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "MUNERA",
+    "Name_cat": "MUNERA",
+    "IdCity": "00000000-0000-0000-0000-000000000055",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "NAVAS DE JORQUERA",
+    "Name_cat": "NAVAS DE JORQUERA",
+    "IdCity": "00000000-0000-0000-0000-000000007315",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "NERPIO",
+    "Name_cat": "NERPIO",
+    "IdCity": "00000000-0000-0000-0000-000000000057",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "ONTUR",
+    "Name_cat": "ONTUR",
+    "IdCity": "00000000-0000-0000-0000-000000000190",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "OSSA DE MONTIEL",
+    "Name_cat": "OSSA DE MONTIEL",
+    "IdCity": "00000000-0000-0000-0000-000000000059",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "PATERNA DEL MADERA",
+    "Name_cat": "PATERNA DEL MADERA",
+    "IdCity": "00000000-0000-0000-0000-000000007316",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "PEÑAS DE SAN PEDRO",
+    "Name_cat": "PEÑAS DE SAN PEDRO",
+    "IdCity": "00000000-0000-0000-0000-000000000198",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "PEÑASCOSA",
+    "Name_cat": "PEÑASCOSA",
+    "IdCity": "00000000-0000-0000-0000-000000007317",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "PÉTROLA",
+    "Name_cat": "PÉTROLA",
+    "IdCity": "00000000-0000-0000-0000-000000000254",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "POVEDILLA",
+    "Name_cat": "POVEDILLA",
+    "IdCity": "00000000-0000-0000-0000-000000007318",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "POZO CAÑADA",
+    "Name_cat": "POZO CAÑADA",
+    "IdCity": "00000000-0000-0000-0000-000000000016",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "POZOHONDO",
+    "Name_cat": "POZOHONDO",
+    "IdCity": "00000000-0000-0000-0000-000000000315",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "POZO-LORENTE",
+    "Name_cat": "POZO-LORENTE",
+    "IdCity": "00000000-0000-0000-0000-000000007319",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "POZUELO",
+    "Name_cat": "POZUELO",
+    "IdCity": "00000000-0000-0000-0000-000000000267",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "RECUEJA",
+    "Name_cat": "RECUEJA, LA",
+    "IdCity": "00000000-0000-0000-0000-000000007320",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "RIÓPAR",
+    "Name_cat": "RIÓPAR",
+    "IdCity": "00000000-0000-0000-0000-000000000089",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "ROBLEDO",
+    "Name_cat": "ROBLEDO",
+    "IdCity": "00000000-0000-0000-0000-000000007321",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "RODA",
+    "Name_cat": "RODA, LA",
+    "IdCity": "00000000-0000-0000-0000-000000000139",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "SALOBRE",
+    "Name_cat": "SALOBRE",
+    "IdCity": "00000000-0000-0000-0000-000000007322",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "SAN PEDRO",
+    "Name_cat": "SAN PEDRO",
+    "IdCity": "00000000-0000-0000-0000-000000000116",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "SOCOVOS",
+    "Name_cat": "SOCOVOS",
+    "IdCity": "00000000-0000-0000-0000-000000000152",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "TARAZONA DE LA MANCHA",
+    "Name_cat": "TARAZONA DE LA MANCHA",
+    "IdCity": "00000000-0000-0000-0000-000000000062",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "TOBARRA",
+    "Name_cat": "TOBARRA",
+    "IdCity": "00000000-0000-0000-0000-000000000064",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "VALDEGANGA",
+    "Name_cat": "VALDEGANGA",
+    "IdCity": "00000000-0000-0000-0000-000000000317",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "VIANOS",
+    "Name_cat": "VIANOS",
+    "IdCity": "00000000-0000-0000-0000-000000007323",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "VILLA DE VES",
+    "Name_cat": "VILLA DE VES",
+    "IdCity": "00000000-0000-0000-0000-000000007324",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "VILLALGORDO DEL JÚCAR",
+    "Name_cat": "VILLALGORDO DEL JÚCAR",
+    "IdCity": "00000000-0000-0000-0000-000000000194",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "VILLAMALEA",
+    "Name_cat": "VILLAMALEA",
+    "IdCity": "00000000-0000-0000-0000-000000000066",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "VILLAPALACIOS",
+    "Name_cat": "VILLAPALACIOS",
+    "IdCity": "00000000-0000-0000-0000-000000000272",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "VILLARROBLEDO",
+    "Name_cat": "VILLARROBLEDO",
+    "IdCity": "00000000-0000-0000-0000-000000000020",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "VILLATOYA",
+    "Name_cat": "VILLATOYA",
+    "IdCity": "00000000-0000-0000-0000-000000007325",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "VILLAVALIENTE",
+    "Name_cat": "VILLAVALIENTE",
+    "IdCity": "00000000-0000-0000-0000-000000007326",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "VILLAVERDE DE GUADALIMAR",
+    "Name_cat": "VILLAVERDE DE GUADALIMAR",
+    "IdCity": "00000000-0000-0000-0000-000000007327",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "VIVEROS",
+    "Name_cat": "VIVEROS",
+    "IdCity": "00000000-0000-0000-0000-000000007328",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  },
+  {
+    "Name": "YESTE",
+    "Name_cat": "YESTE",
+    "IdCity": "00000000-0000-0000-0000-000000000068",
+    "IdProvince": "00000000-0000-0000-0000-000000000002"
+  }
+]

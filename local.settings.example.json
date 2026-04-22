@@ -1,0 +1,15 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+    "AZURE_STORAGE_CONNECTION_STRING": "DefaultEndpointsProtocol=https;AccountName=<storage-account>;AccountKey=<key>;EndpointSuffix=core.windows.net",
+    "AZURE_BLOB_CONTAINER": "fichas-si-escaneadas",
+    "DOCUMENT_INTELLIGENCE_ENDPOINT": "https://<resource>.cognitiveservices.azure.com/",
+    "DOCUMENT_INTELLIGENCE_KEY": "<document-intelligence-key>",
+    "OPENAI_ENDPOINT": "https://<resource>.openai.azure.com/",
+    "OPENAI_API_KEY": "<azure-openai-key>",
+    "OPENAI_DEPLOYMENT_NAME": "gpt-4o",
+    "OPENAI_API_VERSION": "2025-03-01-preview"
+  }
+}
