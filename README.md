@@ -27,6 +27,15 @@ The result is this system: a combination of **Azure Document Intelligence** (str
 
 This repository is shared publicly as a technical reference and portfolio piece. The catalog data (school IDs, degree IDs, locality IDs) has been **anonymized** — replaced with sequential placeholder UUIDs — so no proprietary CRM data is exposed.
 
+## Fake Example
+This video demonstrates the processing of a sample form with the function hosted locally. This process requires the form to have been scanned beforehand using the printer, so that the images can be downloaded from the Azure host. The video shows that scanning a form takes approximately 40–60 seconds. This should not be a cause for concern, as this process can be fully parallelised in batches. Furthermore, it is worth noting that an automated process can run continuously, day and night. Alongside the video, a sample of the fictitious handwritten form is shown.
+
+https://github.com/user-attachments/assets/b708e088-e4d4-4c1e-8a98-a77cd27e07ee
+
+<img width="2480" height="2840" alt="fakeDocument1" src="https://github.com/user-attachments/assets/1fcc52ea-af1c-45d9-91e3-255cf10e71d2" />
+
+<img width="2480" height="2876" alt="fakeDocument2" src="https://github.com/user-attachments/assets/9c431256-b1e9-4ba2-bbe2-69be2b21b266" />
+
 ---
 
 ## Table of contents
