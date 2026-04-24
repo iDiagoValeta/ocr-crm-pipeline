@@ -17,6 +17,14 @@
 
 ---
 
+## Architecture walkthrough (video)
+
+This [YouTube walkthrough](https://www.youtube.com/watch?v=HiWZS1vo-ow&t=32s) explains the main architectural decisions of the pipeline. Click the preview to open at the intended segment (~32s).
+
+[![Architecture walkthrough — ocr-crm-pipeline (YouTube)](https://img.youtube.com/vi/HiWZS1vo-ow/maxresdefault.jpg)](https://www.youtube.com/watch?v=HiWZS1vo-ow&t=32s)
+
+---
+
 ## Why this exists
 
 A private Spanish university had no automated process for handling paper enrollment forms. Students would fill out handwritten forms on-site, and those forms were then sent to an external company for manual digitization — a slow, costly, and error-prone process that didn't scale with the volume of incoming students each academic year.
@@ -40,6 +48,7 @@ https://github.com/user-attachments/assets/b708e088-e4d4-4c1e-8a98-a77cd27e07ee
 
 ## Table of contents
 
+- [Architecture walkthrough (video)](#architecture-walkthrough-video)
 - [Pipeline architecture](#pipeline-architecture)
 - [Quick start](#quick-start)
 - [API Reference](#api-reference)
