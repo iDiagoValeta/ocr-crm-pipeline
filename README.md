@@ -19,9 +19,9 @@
 
 ## Architecture walkthrough (video)
 
-This [YouTube walkthrough](https://www.youtube.com/watch?v=HiWZS1vo-ow&t=32s) explains the main architectural decisions of the pipeline. Click the preview to open at the intended segment (~32s).
+This [YouTube walkthrough](https://youtu.be/CRjsfj677tY) explains the main architectural decisions of the pipeline.
 
-[![Architecture walkthrough — ocr-crm-pipeline (YouTube)](https://img.youtube.com/vi/HiWZS1vo-ow/maxresdefault.jpg)](https://www.youtube.com/watch?v=HiWZS1vo-ow&t=32s)
+[![Architecture walkthrough — ocr-crm-pipeline (YouTube)](https://img.youtube.com/vi/CRjsfj677tY/maxresdefault.jpg)](https://youtu.be/CRjsfj677tY)
 
 ---
 
