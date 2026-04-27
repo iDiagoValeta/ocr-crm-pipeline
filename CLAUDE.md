@@ -104,10 +104,8 @@ main() → _process_image_pair()
     ├── _download_blob_pair()             Descarga + rota ambas imágenes
     ├── analyze_images_with_gpt()
     │   ├── perform_ocr_structured() × 2  Document Intelligence v4.0 (texto + checkboxes + key_value_pairs)
-    │   ├── _log_di_extract_summary()      [DI_EXTRACT_SUMMARY img=N] por imagen
     │   ├── _compute_word_confidence_stats()
     │   ├── _extract_selected_from_ocr()            ':selected:' antes del nombre, filtrado por confianza >= 80%
-    │   ├── _extract_from_key_value_pairs() Mapeo canónico KVP (diagnóstico)
     │   ├── _build_messages_content() + _build_system_prompt()
     │   └── Responses API → GPT
     └── extraer_datos()                   Orquestador (~10 líneas)
@@ -193,7 +191,7 @@ datos del resultado de Azure Document Intelligence combinados:
 3. Cuando el alumno escribe 'X' o tick: `:selected: X Titulación` → el prefijo X/tick se elimina
    y se extrae el nombre. Si 'X' está sola en una línea, se toma la línea siguiente como nombre.
 
-**`_build_checkbox_summary()`**: extrae las marcas brutas de `raw_document_intelligence`, llama a
+**`_build_checkbox_summary()`**: usa `all_selection_marks_unfiltered`, llama a
 `_extract_selected_from_ocr()` y produce un bloque `CHECKBOXES MARCADOS` limpio para incluir en el
 mensaje a GPT.
 
@@ -227,26 +225,11 @@ NOMBRE CENTRO (LOCALIDAD), Id, IdProvince, IdCity, IdCountry
 
 ---
 
-## Etiquetas de log para debugging
+## Diagnóstico y depuración
 
-| Etiqueta | Qué traza |
-|----------|-----------|
-| `[DI_EXTRACT_SUMMARY img=N]` | Resumen por imagen: texto, confianza palabras, marcas aceptadas/rechazadas, tabla KVP |
-| `[OCR_STRUCTURED]` | Resultado OCR, selection marks, estadísticas de confianza |
-| `[KEY_VALUE_PAIRS]` | Pares etiqueta→valor del anverso enviados a GPT y mapeo canónico (diagnóstico) |
-| `[QR_BARCODE]` | Contenido de QR/barcodes (actualmente desactivado, `DI_ADDON_BARCODES=False`) |
-| `[CENTER_SEARCH]` | Estrategia usada, candidatos y score en cada paso |
-| `[CENTER_MATCH]` | Centro seleccionado y puntuación final |
-| `[CHECKBOX_SUMMARY]` | Lista final de checkboxes marcados enviada a GPT (fuente: `:selected:` + confianza) |
-| `[GPT_ANALYZE]` | Pipeline GPT completo: input, output, campos extraídos, timing |
-| `[GPT_INPUT_DEBUG]` | Texto OCR exacto enviado a GPT |
-| `[TITULACION_MATCH]` | Matches con scores |
-| `[VARIANT_SELECTION]` | Selección de variante provincial |
-| `[LOCALIDAD_NORM]` | Normalización: input → output con score |
-| `[PROVINCE]` | Resolución de provincia: alias, prefijo o fuzzy |
-| `[DNI_NORMALIZE]` / `[PHONE_NORMALIZE]` | Correcciones OCR |
-| `[WORD_CONFIDENCE]` | Estadísticas de confianza por palabra |
-| `[EXTRAER_DATOS]` | Resumen completo de la transformación CRM |
+El pipeline principal no emite logs de aplicación ni genera snapshots de debug. La investigación
+de casos se hace reproduciendo localmente la función afectada con el OCR del caso y añadiendo tests
+de regresión antes de ajustar alias, umbrales o normalizadores.
 
 ---
 
@@ -363,7 +346,8 @@ Las secciones principales van delimitadas con:
 
 **Commits**: prefijo convencional obligatorio — `fix:` para correcciones, `feat:` para funcionalidad nueva.
 
-**Logging**: todo código de matching o normalización nuevo debe emitir `logging.info(f"[TAG] ...")` usando la etiqueta del módulo correspondiente (ver tabla de log tags). Sin logging el comportamiento es opaco en producción.
+**Observabilidad**: evita introducir logs en el pipeline principal. Si una corrección necesita
+inspección adicional, cúbrela con tests locales y datos de reproducción controlados.
 
 ---
 
@@ -382,11 +366,10 @@ Las secciones principales van delimitadas con:
 
 Cuando se reporta un error de producción:
 
-1. **Identificar el JSON**: si `SAVE_DEBUG_SNAPSHOT=true`, los archivos se guardan en `debug/` o `DEBUG_DIR` con timestamp. Contienen OCR/GPT/CRM y datos personales; no se versionan.
-2. **Filtrar por etiqueta**: usar `[CENTER_SEARCH]`, `[TITULACION_MATCH]` o `[PHONE_NORMALIZE]` según el campo en `FieldsToReview`.
-3. **Reproducir localmente**: el JSON tiene el OCR text completo. Copiar y ejecutar la función afectada directamente.
-4. **Corrección mínima**: alias dict si es un caso OCR conocido; nuevo test si es un caso nuevo; umbral solo como último recurso.
-5. **Verificar con suite completa** antes de commitear.
+1. **Identificar el campo**: revisar `FieldsToReview` y el dato final CRM afectado.
+2. **Reproducir localmente**: ejecutar la función afectada con el OCR del caso.
+3. **Corrección mínima**: alias dict si es un caso OCR conocido; nuevo test si es un caso nuevo; umbral solo como último recurso.
+4. **Verificar con suite completa** antes de commitear.
 
 ---
 

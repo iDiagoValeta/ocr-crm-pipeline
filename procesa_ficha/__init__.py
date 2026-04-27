@@ -1,14 +1,11 @@
-import base64
 import csv
 import io
 import json
-import logging
 import os
 import re
-import time
 import unicodedata
 from collections import defaultdict
-from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from PIL import Image
@@ -30,35 +27,13 @@ TITULACION_MATCH_THRESHOLD = 70
 
 GPT_MAX_OUTPUT_TOKENS = 32000
 GPT_REASONING_EFFORT = "high"
-GPT_MODEL = "gpt-5.2"
+GPT_MODEL = "gpt-5.4"
 
 OCR_MODEL = "prebuilt-layout"
-IMAGE_MEDIA_TYPE = "image/jpeg"
 SELECTION_MARK_CONFIDENCE_THRESHOLD = 0.80
 WORD_CONFIDENCE_THRESHOLD = 0.80
 WORD_CONFIDENCE_HIGH_CUTOFF = 0.40
 CENTER_REVIEW_SCORE_THRESHOLD = 80
-
-DI_ADDON_BARCODES        = False  # QR reverso contiene solo info promocional del CEU
-DI_ADDON_KEY_VALUE_PAIRS = True   # pares etiqueta→valor anverso — sin coste adicional
-DI_ADDON_HIGH_RESOLUTION = False  # add-on alta resolución (documentos grandes/densos)
-DI_ADDON_QUERY_FIELDS    = False  # add-on preguntas directas sobre campos del anverso
-
-DI_QUERY_FIELDS_FRONT: List[str] = [
-    "DNI o NIF del alumno",
-    "Nombre del alumno",
-    "Primer apellido del alumno",
-    "Segundo apellido del alumno",
-    "Teléfono de contacto",
-    "Email o correo electrónico",
-    "Nombre del centro educativo",
-    "Localidad del centro",
-    "Provincia del centro",
-]
-
-SELECTION_MARK_CONFIDENCE_THRESHOLD_HIGH_RES = 0.85
-QF_CONFIDENCE_FLAG_THRESHOLD = 0.60
-QF_CONFIDENCE_SAFE_THRESHOLD = 0.85
 
 DEFAULT_SESSION_ID = 100000036
 DEFAULT_CAMPAIGN_ID = "852c6f0a-a94d-f011-877a-7c1e52fbd0c9"
@@ -98,16 +73,12 @@ EXTRACTION_JSON_FORMAT = {
 AZURE_STORAGE_CONN_STR = os.environ.get("AZURE_STORAGE_CONNECTION_STRING", "")
 BLOB_CONTAINER_NAME = os.environ.get("AZURE_BLOB_CONTAINER", "fichas-si-escaneadas")
 
-_POLYGON_COORD_RE = re.compile(r'\[([0-9.]+),\s*([0-9.]+)\]')
-
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(CURRENT_DIR)
 BASE_DIR = os.path.join(PROJECT_ROOT, "centros")
 BASE_DIR_TITULACION = os.path.join(PROJECT_ROOT, "titulacion")
 BASE_DIR_CURSO = os.path.join(PROJECT_ROOT, "curso")
 BASE_DIR_LOCALIDADES = os.path.join(PROJECT_ROOT, "localidades")
-DEBUG_DIR = os.environ.get("DEBUG_DIR", os.path.join(PROJECT_ROOT, "debug"))
-SAVE_DEBUG_SNAPSHOT = os.environ.get("SAVE_DEBUG_SNAPSHOT", "").lower() in {"1", "true", "yes", "on"}
 DOC_INTEL_ENDPOINT = os.environ.get("DOCUMENT_INTELLIGENCE_ENDPOINT", "")
 DOC_INTEL_KEY = os.environ.get("DOCUMENT_INTELLIGENCE_KEY", "")
 
@@ -117,15 +88,11 @@ OPENAI_DEPLOYMENT_NAME = os.environ.get("OPENAI_DEPLOYMENT_NAME", GPT_MODEL)
 OPENAI_API_VERSION = os.environ.get("OPENAI_API_VERSION", "2025-03-01-preview")
 
 # ————————————————————————————————————————————————————————————————————————————
-# LOGGING Y CLIENTES
+# CLIENTES
 # ————————————————————————————————————————————————————————————————————————————
 
 _client_openai: Optional[AzureOpenAI] = None
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s"
-)
+_client_document_intelligence: Optional[DocumentIntelligenceClient] = None
 
 def get_openai_client() -> AzureOpenAI:
     """Singleton para cliente de Azure OpenAI (Responses API)."""
@@ -137,6 +104,18 @@ def get_openai_client() -> AzureOpenAI:
             api_version=OPENAI_API_VERSION
         )
     return _client_openai
+
+
+def get_document_intelligence_client() -> DocumentIntelligenceClient:
+    """Singleton para cliente de Azure Document Intelligence."""
+    global _client_document_intelligence
+    if _client_document_intelligence is None:
+        credential = AzureKeyCredential(DOC_INTEL_KEY)
+        _client_document_intelligence = DocumentIntelligenceClient(
+            endpoint=DOC_INTEL_ENDPOINT,
+            credential=credential,
+        )
+    return _client_document_intelligence
 
 
 # ————————————————————————————————————————————————————————————————————————————
@@ -164,6 +143,9 @@ class GlobalDataManager:
     centros_by_provincia: Dict[str, Dict[str, Dict[str, Any]]] = {}
     all_centros_flat: Dict[str, Dict[str, Any]] = {}
     all_centros_names: List[str] = []
+    centros_normalized_by_provincia: Dict[str, List[Tuple[str, str]]] = {}
+    center_normalized_by_name: Dict[str, str] = {}
+    center_locality_by_name: Dict[str, str] = {}
     localidades_by_provincia: Dict[str, List[str]] = {}
     all_localidades_normalized: Set[str] = set()
     province_aliases: Dict[str, str] = {}
@@ -213,7 +195,7 @@ class GlobalDataManager:
         with open(tit_path, encoding="utf-8") as f:
             lines = f.readlines()
 
-            for i, line in enumerate(lines):
+            for line in lines:
                 line_stripped = line.strip()
 
                 if not line_stripped:
@@ -330,6 +312,22 @@ class GlobalDataManager:
                     cls.all_centros_flat[center_name] = center_data
 
         cls.all_centros_names = list(cls.all_centros_flat.keys())
+        cls._build_center_indexes()
+
+    @classmethod
+    def _build_center_indexes(cls) -> None:
+        """Precalcula normalizaciones de centros usadas en matching."""
+        cls.centros_normalized_by_provincia = {}
+        cls.center_normalized_by_name = {}
+        cls.center_locality_by_name = {}
+        for prov_key, centers in cls.centros_by_provincia.items():
+            normalized_map: List[Tuple[str, str]] = []
+            for name in centers:
+                norm_name = _normalize_center_text(name)
+                normalized_map.append((name, norm_name))
+                cls.center_normalized_by_name[name] = norm_name
+                cls.center_locality_by_name[name] = _extract_localidad_from_center_name(name)
+            cls.centros_normalized_by_provincia[prov_key] = normalized_map
 
     @classmethod
     def _load_localidades(cls) -> None:
@@ -364,12 +362,8 @@ class GlobalDataManager:
                     norm = _normalize_center_text(n)
                     if norm:
                         cls.all_localidades_normalized.add(norm)
-            except FileNotFoundError:
-                logging.info(f"[LOCALIDADES] Archivo no encontrado para {prov_key}, omitiendo")
-            except json.JSONDecodeError as e:
-                logging.error(f"[LOCALIDADES] JSON malformado en {prov_key}: {e}")
-            except OSError as e:
-                logging.warning(f"[LOCALIDADES] Error de I/O en {prov_key}: {e}")
+            except (FileNotFoundError, json.JSONDecodeError, OSError):
+                continue
 
         cls._load_province_aliases()
 
@@ -398,7 +392,6 @@ class GlobalDataManager:
             with open(province_ids_path, encoding="utf-8") as f:
                 provinces = json.load(f)
         except (json.JSONDecodeError, OSError) as e:
-            logging.warning(f"[PROVINCE] No se pudieron cargar alias de provincias: {e}")
             return
 
         normalized_keys = {_normalize_center_text(key): key for key in available_keys}
@@ -456,10 +449,6 @@ def _normalize_email(email: Optional[str]) -> str:
     email_original = str(email).strip()
     email_clean = email_original.replace(" ", "")
     email_ascii = unicodedata.normalize('NFKD', email_clean).encode('ascii', 'ignore').decode('ascii')
-    if email_original != email_ascii:
-        logging.info(f"[EMAIL_NORMALIZE] '{email_original}' -> '{email_ascii}'")
-    else:
-        logging.debug(f"[EMAIL_NORMALIZE] '{email_ascii}' (sin cambios)")
     return email_ascii
 
 
@@ -531,15 +520,9 @@ def _normalize_dni_nie(dni: Optional[str]) -> str:
     if len(body_digits) != expected_body_len:
         if len(body_digits) == expected_body_len + 1:
             heuristic_body = body_digits[-expected_body_len:]
-            logging.info(
-                f"[DNI_NORMALIZE] Heurística: body con {len(body_digits)} dígitos, usando últimos {expected_body_len}: {heuristic_body}"
-            )
             body_digits = heuristic_body
         else:
             result_fallback = "".join(chars)
-            logging.warning(
-                f"[DNI_NORMALIZE] No se pudo normalizar correctamente '{dni_original}' -> '{result_fallback}' (digits in body: {len(body_digits)}, expected: {expected_body_len})"
-            )
             return result_fallback
 
     if is_nie:
@@ -552,9 +535,7 @@ def _normalize_dni_nie(dni: Optional[str]) -> str:
     try:
         num = int(number_for_calc)
     except (ValueError, IndexError) as e:
-        logging.warning(f"[DNI_NORMALIZE] Error en cálculo de control: {e}")
         result_fallback = "".join(chars)
-        logging.warning(f"[DNI_NORMALIZE] Número inválido para cálculo: '{number_for_calc}' -> retornando '{result_fallback}'")
         return result_fallback
 
     LETTERS = "TRWAGMYFPDXBNJZSQVHLCKE"
@@ -570,10 +551,6 @@ def _normalize_dni_nie(dni: Optional[str]) -> str:
             corrected = chars[0] + body_digits + expected_letter
         else:
             corrected = body_digits + expected_letter
-        logging.info(
-            f"[DNI_NORMALIZE] Posición de letra no es alfabética ('{current_last}') "
-            f"→ calculada '{expected_letter}' (num: {number_for_calc})"
-        )
     elif current_last.upper() != expected_letter:
         # Azure DI leyó una letra real que no coincide con el algoritmo → conservarla
         # El post-procesado la flaggeará para revisión humana
@@ -581,20 +558,11 @@ def _normalize_dni_nie(dni: Optional[str]) -> str:
             corrected = chars[0] + body_digits + current_last.upper()
         else:
             corrected = body_digits + current_last.upper()
-        logging.info(
-            f"[DNI_NORMALIZE] Letra leída='{current_last.upper()}' ≠ calculada='{expected_letter}' "
-            f"→ conservando la de Azure DI (num: {number_for_calc})"
-        )
     else:
         if is_nie:
             corrected = chars[0] + body_digits + current_last.upper()
         else:
             corrected = body_digits + current_last.upper()
-
-    if corrections:
-        logging.info(f"[DNI_NORMALIZE] '{dni_original}' -> '{corrected}' (correcciones OCR: {', '.join(corrections)})")
-    else:
-        logging.debug(f"[DNI_NORMALIZE] '{dni_original}' -> '{corrected}' (sin correcciones OCR)")
 
     return corrected
 
@@ -683,16 +651,7 @@ def _normalize_phone(telefono: str) -> str:
                 break
     
     if len(digitos_nacionales) < min_digitos:
-        logging.warning(
-            f"[PHONE_NORMALIZE] Teléfono inválido: '{telefono_original}' -> '{result}' "
-            f"(dígitos nacionales: {len(digitos_nacionales)}, mínimo: {min_digitos}) -> DESCARTADO"
-        )
         return ""
-    
-    if corrections:
-        logging.info(f"[PHONE_NORMALIZE] '{telefono_original}' -> '{result}' (correcciones OCR: {', '.join(corrections)})")
-    else:
-        logging.debug(f"[PHONE_NORMALIZE] '{telefono_original}' -> '{result}' (sin correcciones)")
     
     return result
 
@@ -714,70 +673,6 @@ def _split_apellidos(apellidos: str) -> Tuple[str, str]:
 # UTILIDADES DE IMAGEN
 # ————————————————————————————————————————————————————————————————————————————
 
-def encode_image_to_base64(image_bytes: bytes) -> str:
-    """Codifica imagen en bytes a string base64."""
-    return base64.b64encode(image_bytes).decode('utf-8')
-
-
-def _log_di_extract_summary(
-    result_dict: Dict[str, Any],
-    image_index: int,
-) -> None:
-    """
-    Emite un resumen legible de todo lo que Azure DI extrajo de una imagen.
-
-    Muestra texto, manuscrito, selection marks aceptadas/rechazadas, key-value
-    pairs y palabras de baja confianza. Facilita la verificación en producción
-    de que el pipeline extrae correctamente cada sección del formulario.
-    """
-    SEP = "─" * 58
-    tag = f"[DI_EXTRACT_SUMMARY img={image_index + 1}]"
-
-    logging.info(f"{tag} {SEP}")
-
-    text = result_dict.get("text", "")
-    has_hw = result_dict.get("has_handwritten", False)
-    hw_content = result_dict.get("handwritten_content", "")
-    logging.info(f"{tag} Texto OCR: {len(text)} chars | Manuscrito detectado: {has_hw}")
-    if has_hw and hw_content:
-        preview = hw_content[:180].replace("\n", " ¶ ")
-        logging.info(f"{tag} Manuscrito: «{preview}{'…' if len(hw_content) > 180 else ''}»")
-
-    pages = result_dict.get("pages", [])
-    all_words = [w for p in pages for w in p.get("words", [])]
-    if all_words:
-        confs = [w["confidence"] for w in all_words]
-        mean_c = sum(confs) / len(confs)
-        min_c  = min(confs)
-        low_c  = sum(1 for c in confs if c < WORD_CONFIDENCE_THRESHOLD)
-        logging.info(
-            f"{tag} Palabras: {len(all_words)} total | "
-            f"confianza media={mean_c:.2f} mín={min_c:.2f} | "
-            f"{low_c} por debajo de {WORD_CONFIDENCE_THRESHOLD}"
-        )
-
-    unfiltered = result_dict.get("all_selection_marks_unfiltered", [])
-    accepted   = result_dict.get("selection_marks", [])
-    rejected   = len(unfiltered) - len(accepted)
-    sel_accepted = sum(1 for m in accepted if str(m.get("state", "")) == "selected")
-    logging.info(
-        f"{tag} Marks: {len(unfiltered)} total | "
-        f"{len(accepted)} aceptadas (umbral≥{SELECTION_MARK_CONFIDENCE_THRESHOLD}) | "
-        f"{rejected} rechazadas | {sel_accepted} ':selected:' válidas"
-    )
-
-    kvp = result_dict.get("key_value_pairs", [])
-    if kvp:
-        logging.info(f"{tag} Key-Value Pairs ({len(kvp)}):")
-        for kv in kvp:
-            conf_str = f" [{kv['confidence']:.0%}]" if kv.get("confidence") is not None else ""
-            logging.info(f"{tag}   {kv.get('key', '?')!r:<30} → {kv.get('value', '')!r}{conf_str}")
-    else:
-        logging.info(f"{tag} Key-Value Pairs: ninguno")
-
-    logging.info(f"{tag} {SEP}")
-
-
 def rotate_image_if_needed(image_bytes: bytes, rotation_degrees: int = 90) -> bytes:
     """
     Rota una imagen el número especificado de grados en sentido horario.
@@ -796,28 +691,7 @@ def rotate_image_if_needed(image_bytes: bytes, rotation_degrees: int = 90) -> by
         rotated_image.save(output_buffer, format='JPEG', quality=95)
         return output_buffer.getvalue()
     except Exception as e:
-        logging.warning(f"[IMAGE_ROTATE] Error rotando imagen, devolviendo original: {e}")
         return image_bytes
-
-# ————————————————————————————————————————————————————————————————————————————
-# UTILIDADES AUXILIARES
-# ————————————————————————————————————————————————————————————————————————————
-
-def _format_polygon(polygon: Optional[List[Any]]) -> str:
-    """
-    Formatea un polígono para logging.
-
-    SDK v3.x devuelve lista de objetos con atributos .x/.y.
-    SDK v4.0 devuelve lista plana de floats [x1, y1, x2, y2, ...].
-    Ambos formatos se manejan correctamente.
-    """
-    if not polygon:
-        return "N/A"
-    if polygon and isinstance(polygon[0], float):
-        pairs = [(polygon[i], polygon[i + 1]) for i in range(0, len(polygon) - 1, 2)]
-        return ", ".join([f"[{x:.2f}, {y:.2f}]" for x, y in pairs])
-    return ", ".join([f"[{p.x:.2f}, {p.y:.2f}]" for p in polygon])
-
 
 # ————————————————————————————————————————————————————————————————————————————
 # OCR CON AZURE DOCUMENT INTELLIGENCE
@@ -825,73 +699,42 @@ def _format_polygon(polygon: Optional[List[Any]]) -> str:
 
 def perform_ocr_structured(
     image_bytes: bytes,
-    high_resolution: bool = False,
-    query_fields: Optional[List[str]] = None,
-    image_index: int = 0,
 ) -> Dict[str, Any]:
     """
     Extrae información estructurada de una imagen usando Azure Document Intelligence v4.0.
 
-    Utiliza el modelo prebuilt-layout con add-ons configurados por constantes globales.
-    Con DI_ADDON_BARCODES activo extrae QR/barcodes (útil en el reverso).
-    Con DI_ADDON_KEY_VALUE_PAIRS activo extrae pares etiqueta→valor (útil en el anverso).
-    Con high_resolution=True activa ocrHighResolution (checkboxes densos del reverso).
-    Con DI_ADDON_QUERY_FIELDS y query_fields activo extrae campos por pregunta directa.
+    Utiliza el modelo prebuilt-layout con pares etiqueta→valor del anverso.
 
     Returns:
-        Diccionario con text, selection_marks, all_selection_marks_unfiltered, tables,
-        has_handwritten, handwritten_content, pages, barcodes, key_value_pairs,
-        raw_document_intelligence.
+        Diccionario con text, selection_marks, all_selection_marks_unfiltered,
+        has_handwritten, handwritten_content, pages y key_value_pairs.
     """
     empty_result = {
         "text": "",
         "selection_marks": [],
         "all_selection_marks_unfiltered": [],
-        "tables": [],
         "has_handwritten": False,
         "handwritten_content": "",
         "pages": [],
-        "barcodes": [],
         "key_value_pairs": [],
-        "raw_document_intelligence": None,
     }
 
     if not DOC_INTEL_ENDPOINT or not DOC_INTEL_KEY:
-        logging.warning("[OCR_STRUCTURED] Credenciales de OCR no configuradas")
         return empty_result
 
     try:
-        features: List[str] = []
-        if DI_ADDON_BARCODES:
-            features.append("barcodes")
-        if DI_ADDON_KEY_VALUE_PAIRS:
-            features.append("keyValuePairs")
-        if high_resolution:
-            features.append("ocrHighResolution")
-        if DI_ADDON_QUERY_FIELDS and query_fields:
-            features.append("queryFields")
+        features: List[str] = ["keyValuePairs"]
 
-        credential = AzureKeyCredential(DOC_INTEL_KEY)
-        client = DocumentIntelligenceClient(endpoint=DOC_INTEL_ENDPOINT, credential=credential)
-        logging.info(f"[OCR_STRUCTURED] Enviando imagen a Azure Document Intelligence (features={features})...")
+        client = get_document_intelligence_client()
         poller = client.begin_analyze_document(
             OCR_MODEL,
             io.BytesIO(image_bytes),
             content_type="application/octet-stream",
-            features=features if features else None,
-            query_fields=query_fields if (DI_ADDON_QUERY_FIELDS and query_fields) else None,
+            features=features,
         )
         result = poller.result()
-        raw_document_intelligence: Optional[Dict[str, Any]] = None
-        if hasattr(result, "as_dict"):
-            try:
-                raw_document_intelligence = result.as_dict()
-            except Exception as raw_exc:
-                logging.warning(f"[OCR_STRUCTURED] No se pudo serializar raw de DI: {raw_exc}")
 
         full_text = result.content
-        logging.info(f"[OCR_STRUCTURED] Texto OCR recibido: {len(full_text)} caracteres")
-        logging.debug(f"[OCR_STRUCTURED] Texto completo:\n{full_text}")
 
         has_handwritten = False
         handwritten_spans = []
@@ -911,22 +754,6 @@ def perform_ocr_structured(
         pages_info = []
 
         for page in result.pages:
-            page_info = {
-                "page_number": page.page_number,
-                "width": page.width,
-                "height": page.height,
-                "unit": page.unit,
-                "lines": [],
-                "selection_marks": []
-            }
-
-            if page.lines:
-                for line in page.lines:
-                    page_info["lines"].append({
-                        "content": line.content,
-                        "polygon": _format_polygon(line.polygon) if hasattr(line, 'polygon') else "N/A"
-                    })
-
             words_info = []
             if page.words:
                 for word in page.words:
@@ -934,133 +761,45 @@ def perform_ocr_structured(
                         "content": word.content,
                         "confidence": word.confidence,
                     })
-            page_info["words"] = words_info
+            page_info = {"words": words_info}
 
             if page.selection_marks:
-                filtered_out_low_confidence = 0
-                filtered_out_selected_low_conf = 0
-                all_marks_debug = []
-
                 for mark in page.selection_marks:
                     mark_info = {
                         "state": mark.state,
                         "confidence": mark.confidence,
-                        "polygon": _format_polygon(mark.polygon) if hasattr(mark, 'polygon') else "N/A",
                         "page": page.page_number
                     }
-                    all_marks_debug.append(mark_info)
                     all_marks_unfiltered.append(mark_info)
 
                     if mark.confidence >= SELECTION_MARK_CONFIDENCE_THRESHOLD:
-                        page_info["selection_marks"].append(mark_info)
                         all_selection_marks.append(mark_info)
-                    else:
-                        filtered_out_low_confidence += 1
-                        if mark.state == "selected":
-                            filtered_out_selected_low_conf += 1
-
-                kept_count = len(page_info["selection_marks"])
-                logging.info(
-                    f"[OCR_STRUCTURED] Pág {page.page_number}: {len(all_marks_debug)} marcas ADI "
-                    f"({kept_count} aceptadas, {filtered_out_low_confidence} descartadas, "
-                    f"umbral={SELECTION_MARK_CONFIDENCE_THRESHOLD})"
-                )
-                logging.debug(f"[OCR_STRUCTURED] Detalle marcas pág {page.page_number}: " +
-                    ", ".join(f"{m['state']}:{m['confidence']:.2f}" for m in sorted(all_marks_debug, key=lambda x: x["confidence"], reverse=True)))
 
             pages_info.append(page_info)
 
-        selected_count = sum(1 for m in all_selection_marks if m["state"] == "selected")
-        unselected_count = sum(1 for m in all_selection_marks if m["state"] == "unselected")
-
-        tables_info = []
-        if result.tables:
-            for table_idx, table in enumerate(result.tables):
-                table_info = {
-                    "index": table_idx,
-                    "row_count": table.row_count,
-                    "column_count": table.column_count,
-                    "cells": []
-                }
-
-                for cell in table.cells:
-                    cell_info = {
-                        "row": cell.row_index,
-                        "column": cell.column_index,
-                        "content": cell.content,
-                        "kind": cell.kind if hasattr(cell, 'kind') else "content"
-                    }
-                    table_info["cells"].append(cell_info)
-
-                tables_info.append(table_info)
-
-        logging.info(
-            f"[OCR_STRUCTURED] Selection marks: {selected_count} selected, {unselected_count} unselected "
-            f"(umbral confianza: {SELECTION_MARK_CONFIDENCE_THRESHOLD})"
-        )
-        total_words = sum(len(p.get("words", [])) for p in pages_info)
-        if total_words > 0:
-            all_confs = [w["confidence"] for p in pages_info for w in p.get("words", [])]
-            mean_conf = sum(all_confs) / len(all_confs)
-            min_conf = min(all_confs)
-            low_conf_count = sum(1 for c in all_confs if c < WORD_CONFIDENCE_THRESHOLD)
-            logging.info(
-                f"[OCR_STRUCTURED] Palabras: {total_words} total, "
-                f"confianza media={mean_conf:.2f}, mín={min_conf:.2f}, "
-                f"{low_conf_count} por debajo de {WORD_CONFIDENCE_THRESHOLD}"
-            )
-        else:
-            logging.info("[OCR_STRUCTURED] Sin palabras detectadas")
-
-        logging.info(f"[OCR_STRUCTURED] Manuscrito detectado: {has_handwritten}")
-        if has_handwritten and handwritten_content:
-            logging.info(f"[OCR_STRUCTURED] Contenido manuscrito: {handwritten_content[:200]}{'...' if len(handwritten_content) > 200 else ''}")
-        if tables_info:
-            logging.info(f"[OCR_STRUCTURED] Tablas detectadas: {len(tables_info)}")
-
-        barcodes: List[Dict[str, Any]] = []
-        if DI_ADDON_BARCODES:
-            for page in result.pages:
-                for bc in getattr(page, "barcodes", []) or []:
-                    barcodes.append({
-                        "kind":       str(bc.kind) if bc.kind else "",
-                        "value":      bc.value or "",
-                        "page":       page.page_number,
-                        "confidence": getattr(bc, "confidence", None),
-                    })
-            if barcodes:
-                logging.info(f"[OCR_STRUCTURED] Barcodes/QR detectados: {barcodes}")
-
         key_value_pairs: List[Dict[str, Any]] = []
-        if DI_ADDON_KEY_VALUE_PAIRS:
-            for kv in getattr(result, "key_value_pairs", []) or []:
-                key_text  = (kv.key.content   or "").strip() if kv.key   else ""
-                val_text  = (kv.value.content or "").strip() if kv.value else ""
-                if key_text:
-                    key_value_pairs.append({
-                        "key":        key_text,
-                        "value":      val_text,
-                        "confidence": getattr(kv, "confidence", None),
-                    })
-            logging.info(f"[OCR_STRUCTURED] KeyValuePairs extraídos: {len(key_value_pairs)}")
+        for kv in getattr(result, "key_value_pairs", []) or []:
+            key_text  = (kv.key.content   or "").strip() if kv.key   else ""
+            val_text  = (kv.value.content or "").strip() if kv.value else ""
+            if key_text:
+                key_value_pairs.append({
+                    "key":        key_text,
+                    "value":      val_text,
+                    "confidence": getattr(kv, "confidence", None),
+                })
 
         result_out = {
             "text": full_text,
             "selection_marks": all_selection_marks,
             "all_selection_marks_unfiltered": all_marks_unfiltered,
-            "tables": tables_info,
             "has_handwritten": has_handwritten,
             "handwritten_content": handwritten_content,
             "pages": pages_info,
-            "barcodes": barcodes,
             "key_value_pairs": key_value_pairs,
-            "raw_document_intelligence": raw_document_intelligence,
         }
-        _log_di_extract_summary(result_out, image_index=image_index)
         return result_out
 
     except Exception as e:
-        logging.error(f"[OCR_STRUCTURED] Error durante el análisis: {e}", exc_info=True)
         return empty_result
 
 
@@ -1121,8 +860,6 @@ def _extract_selected_from_ocr(ocr_text: str, selection_marks: List[Dict] = None
                     selected.append(label)
             last_marker = None
 
-    if selected:
-        logging.info(f"[CHECKBOX_PRIMARY] {len(selected)} titulaciones con confianza >= {SELECTION_MARK_CONFIDENCE_THRESHOLD}: {selected}")
     return selected
 
 
@@ -1163,84 +900,10 @@ def extract_course_from_text(ocr_text: str) -> str:
 
     return ""
 
-def _process_barcodes(barcodes: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """
-    Interpreta QR/barcodes extraídos del reverso.
-
-    Loguea el contenido crudo de cada código. Si algún valor coincide con el
-    patrón de DNI (8 dígitos + letra) o NIE (X/Y/Z + 7 dígitos + letra),
-    lo devuelve como 'dni_qr' para validación cruzada con el DNI extraído por OCR/GPT.
-    """
-    result: Dict[str, Any] = {}
-    for bc in barcodes:
-        value = bc.get("value", "")
-        logging.info(f"[QR_BARCODE] kind={bc.get('kind')} pág={bc.get('page')} val='{value}'")
-        cleaned = re.sub(r'[\s\-]', '', value).upper()
-        if re.match(r'^[0-9]{8}[A-Z]$', cleaned) or re.match(r'^[XYZ][0-9]{7}[A-Z]$', cleaned):
-            result["dni_qr"] = cleaned
-            logging.info(f"[QR_BARCODE] Posible DNI/NIE en QR: '{cleaned}'")
-    return result
-
-
-def _extract_from_key_value_pairs(kvp_list: List[Dict[str, Any]]) -> Dict[str, str]:
-    """
-    Mapea key-value pairs de Azure DI a nombres de campo canónicos.
-
-    Usa fuzzy matching (token_set_ratio >= 80) entre la etiqueta normalizada
-    y un dict de aliases. Solo incluye el campo con mejor score; descarta valores
-    vacíos. Devuelve el primer match por campo canónico.
-    """
-    _KVP_FIELD_ALIASES = {
-        "DNI": "dni",
-        "DNI O NIE": "dni",
-        "NIE": "dni",
-        "NIF": "dni",
-        "LETRA": "letra_dni",
-        "NOMBRE": "nombre",
-        "NOMBRE DEL ALUMNO": "nombre",
-        "PRIMER APELLIDO": "primer_apellido",
-        "PRIMER APELLIDO DEL ALUMNO": "primer_apellido",
-        "SEGUNDO APELLIDO": "segundo_apellido",
-        "SEGUNDO APELLIDO DEL ALUMNO": "segundo_apellido",
-        "APELLIDO": "apellido",
-        "APELLIDOS": "apellido",
-        "TELEFONO": "telefono",
-        "TELEFONO DE CONTACTO": "telefono",
-        "MOVIL": "telefono",
-        "EMAIL": "email",
-        "E MAIL": "email",
-        "E MAIL EN MAYUSCULAS": "email",
-        "CORREO": "email",
-        "CORREO ELECTRONICO": "email",
-        "LOCALIDAD": "localidad",
-        "CENTRO": "centro",
-        "PROVINCIA": "provincia",
-        "CURSO": "curso",
-    }
-    extracted: Dict[str, str] = {}
-    for kv in kvp_list:
-        key_raw = kv.get("key", "")
-        value   = kv.get("value", "")
-        if not key_raw or not value:
-            continue
-        key_norm = _normalize_center_text(key_raw)
-        best_field: Optional[str] = None
-        best_score = 0
-        for alias, field in _KVP_FIELD_ALIASES.items():
-            score = fuzz.token_set_ratio(key_norm, alias)
-            if score > best_score:
-                best_score = score
-                best_field = field
-        if best_score >= 80 and best_field and best_field not in extracted:
-            extracted[best_field] = value
-            logging.info(f"[KEY_VALUE_PAIRS] '{key_raw}' → campo='{best_field}', valor='{value}', score={best_score}")
-    return extracted
-
-
 def _extract_kvp_confidence(kvp_list: List[Dict[str, Any]]) -> Dict[str, float]:
     """
     Devuelve la confianza KVP de Azure DI para los campos 'nombre' y 'apellido'.
-    Usa el mismo fuzzy matching que _extract_from_key_value_pairs.
+    Usa fuzzy matching contra las etiquetas esperadas.
     """
     _TARGETS = {"NOMBRE": "nombre", "APELLIDOS": "apellido"}
     result: Dict[str, float] = {}
@@ -1362,10 +1025,6 @@ def _select_best_variant_by_province(
             best_variant = variant
 
     if best_variant:
-        logging.info(
-            f"[VARIANT_SELECTION] Seleccionada: '{best_variant['name']}' "
-            f"({best_variant['provincia']}) -> ID: {best_variant['id']}"
-        )
         return best_variant["name"], best_variant["id"]
 
     return matched_name, GlobalDataManager.titulaciones.get(matched_name, "")
@@ -1437,16 +1096,10 @@ def analyze_titulacion_local(
 
     if score >= 95 and not tiene_variantes:
         titulacion_id = GlobalDataManager.titulaciones.get(original_name, "")
-        logging.info(
-            f"[TITULACION_MATCH] Match exacto: '{titulacion}' -> '{original_name}' -> ID: {titulacion_id}"
-        )
         return titulacion_id
 
     final_name, titulacion_id = _select_best_variant_by_province(original_name, provincia_usuario)
 
-    logging.info(
-        f"[TITULACION_MATCH] '{titulacion}' -> '{final_name}' (Score: {score}) -> ID: {titulacion_id}"
-    )
     return titulacion_id
 
 
@@ -1461,31 +1114,23 @@ def map_checked_degrees(
         Lista de IDs de titulaciones (ej: ["123", "456", "789"])
     """
     if not lista_titulaciones or not isinstance(lista_titulaciones, list):
-        logging.info("[MAP_DEGREES] Lista de titulaciones vacía o inválida")
         return []
 
-    logging.info(f"[MAP_DEGREES] Mapeando {len(lista_titulaciones)} titulaciones (provincia: {provincia_usuario or 'N/A'})")
     ids_encontrados = []
     for titulo_detectado in lista_titulaciones:
         if _is_non_degree_checkbox_label(titulo_detectado):
-            logging.info(f"[MAP_DEGREES]   - '{titulo_detectado}' ignorado (etiqueta de sede/ruido)")
             continue
         id_tit = analyze_titulacion_local(titulo_detectado, provincia_usuario)
         if id_tit:
             ids_encontrados.append(id_tit)
-            logging.info(f"[MAP_DEGREES]   ✓ '{titulo_detectado}' -> ID: {id_tit}")
-        else:
-            logging.warning(f"[MAP_DEGREES]   ✗ '{titulo_detectado}' -> SIN MATCH")
 
     result = list(dict.fromkeys(ids_encontrados))
-    logging.info(f"[MAP_DEGREES] Resultado: {len(result)} IDs únicos de {len(lista_titulaciones)} titulaciones")
     return result
 
 
 def analyze_curso_local(curso: str) -> str:
     """Busca el ID de un curso usando fuzzy matching."""
     if not curso:
-        logging.info("[CURSO_MATCH] Curso vacío, omitiendo búsqueda")
         return ""
 
     GlobalDataManager.load()
@@ -1495,16 +1140,10 @@ def analyze_curso_local(curso: str) -> str:
     if result:
         match_name, score, _ = result
         if score < COURSE_MATCH_THRESHOLD:
-            logging.warning(
-                f"[CURSO_MATCH] '{curso}' -> SIN MATCH suficiente "
-                f"(mejor='{match_name}', score={score}, umbral={COURSE_MATCH_THRESHOLD})"
-            )
             return ""
         curso_id = GlobalDataManager.cursos[match_name]
-        logging.info(f"[CURSO_MATCH] '{curso}' -> '{match_name}' (Score: {score}) -> ID: {curso_id}")
         return curso_id
 
-    logging.warning(f"[CURSO_MATCH] '{curso}' -> SIN MATCH en catálogo de cursos")
     return ""
 
 # ————————————————————————————————————————————————————————————————————————————
@@ -1630,9 +1269,6 @@ def _normalize_localidad_input(localidad_usuario: str, provincia: str) -> str:
         names = GlobalDataManager.localidades_by_provincia.get(prov_key, [])
         for name in names:
             if _normalize_center_text(name) == _normalize_center_text(alias_target):
-                logging.info(
-                    f"[LOCALIDAD_NORM] '{localidad_usuario}' -> '{name}' (alias directo)"
-                )
                 return name
 
     names = GlobalDataManager.localidades_by_provincia.get(prov_key, [])
@@ -1651,9 +1287,6 @@ def _normalize_localidad_input(localidad_usuario: str, provincia: str) -> str:
     if best:
         match_name, score, _ = best
         if score >= 80:
-            logging.info(
-                f"[LOCALIDAD_NORM] '{localidad_usuario}' -> '{match_name}' (Score: {score}, prov: {prov_key})"
-            )
             return match_name
     return localidad_usuario.strip()
 
@@ -1753,22 +1386,17 @@ def _find_province_key(provincia: str) -> Optional[str]:
     if prov_upper in community_aliases:
         alias = community_aliases[prov_upper]
         if alias in available_keys:
-            logging.info(f"[PROVINCE] '{provincia}' -> '{alias}' (alias)")
             return alias
 
     if prov_upper in GlobalDataManager.province_aliases:
         alias = GlobalDataManager.province_aliases[prov_upper]
         if alias in available_keys:
-            logging.info(f"[PROVINCE] '{provincia}' -> '{alias}' (alias CRM)")
             return alias
 
     short = prov_upper.replace(" ", "")
     if len(short) >= 3:
         prefix_candidates = [k for k in available_keys if _normalize_center_text(k).startswith(short)]
         if len(prefix_candidates) == 1:
-            logging.info(
-                f"[PROVINCE] '{provincia}' -> '{prefix_candidates[0]}' (prefijo)"
-            )
             return prefix_candidates[0]
 
     res_ratio  = process.extractOne(prov_upper, available_keys, scorer=fuzz.ratio,  processor=utils.default_process)
@@ -1781,14 +1409,8 @@ def _find_province_key(provincia: str) -> Optional[str]:
     if best_result:
         match_name, score, _ = best_result
         if score >= PROVINCE_MATCH_THRESHOLD:
-            logging.info(
-                f"[PROVINCE] '{provincia}' -> '{match_name}' (fuzzy, score: {score})"
-            )
             return match_name
 
-        logging.warning(
-            f"[PROVINCE] '{provincia}' no supera umbral, usando fallback '{match_name}' (score: {score})"
-        )
         return match_name
 
     return available_keys[0] if available_keys else prov_upper
@@ -1809,18 +1431,18 @@ def _pick_best_by_localidad(candidates: List[str], localidad: str, search_term: 
             return max(
                 candidates,
                 key=lambda n: (
-                    fuzz.token_set_ratio(norm_search, _normalize_center_text(n)),
-                    -len(_normalize_center_text(n)),
+                    fuzz.token_set_ratio(norm_search, _center_norm(n)),
+                    -len(_center_norm(n)),
                 )
             )
-        return max(candidates, key=lambda n: len(_normalize_center_text(n)))
+        return max(candidates, key=lambda n: len(_center_norm(n)))
     localidad_norm = _normalize_localidad(localidad)
     if not localidad_norm:
-        return max(candidates, key=lambda n: len(_normalize_center_text(n)))
+        return max(candidates, key=lambda n: len(_center_norm(n)))
     best_match = None
     best_score = -1
     for name in candidates:
-        loc_centro = _extract_localidad_from_center_name(name)
+        loc_centro = _center_loc(name)
         if not loc_centro:
             continue
         if _localidad_matches(localidad, loc_centro):
@@ -1831,20 +1453,36 @@ def _pick_best_by_localidad(candidates: List[str], localidad: str, search_term: 
     return best_match
 
 
+def _center_norm(center_name: str) -> str:
+    """Devuelve nombre de centro normalizado desde cache o cálculo directo."""
+    cached = GlobalDataManager.center_normalized_by_name.get(center_name)
+    if cached is not None:
+        return cached
+    return _normalize_center_text(center_name)
+
+
+def _center_loc(center_name: str) -> str:
+    """Devuelve localidad extraída de centro desde cache o cálculo directo."""
+    cached = GlobalDataManager.center_locality_by_name.get(center_name)
+    if cached is not None:
+        return cached
+    return _extract_localidad_from_center_name(center_name)
+
+
 def _score_center_candidate(center_name: str, search_term: str, localidad: str) -> float:
     """
     Puntúa un candidato usando nombre de centro + localidad.
     - 70% similitud del nombre
     - 30% similitud de localidad (si hay localidad de entrada)
     """
-    norm_center = _normalize_center_text(center_name)
+    norm_center = _center_norm(center_name)
     norm_search = _normalize_center_text(search_term)
     name_score = fuzz.token_set_ratio(norm_search, norm_center) if norm_search and norm_center else 0
 
     if not localidad:
         return float(name_score)
 
-    center_loc = _extract_localidad_from_center_name(center_name)
+    center_loc = _center_loc(center_name)
     if not center_loc:
         return float(name_score * 0.85)
 
@@ -1906,25 +1544,19 @@ def _search_centers_by_locality(
     loc_norm = _normalize_center_text(localidad)
     locality_subset: Dict[str, Dict[str, Any]] = {}
     for name, data in subset_centers.items():
-        loc = _extract_localidad_from_center_name(name)
+        loc = _center_loc(name)
         if loc and _localidad_matches(localidad, loc):
             locality_subset[name] = data
         elif (not loc or _normalize_center_text(loc) in _PROVINCIAS) and loc_norm:
-            if loc_norm in _normalize_center_text(name):
+            if loc_norm in _center_norm(name):
                 locality_subset[name] = data
 
     if not locality_subset:
         return None
 
-    logging.info(
-        f"[CENTER_MATCH] Locality-first: {len(locality_subset)} centros en localidad '{localidad}'"
-    )
 
     if len(locality_subset) == 1:
         name = list(locality_subset.keys())[0]
-        logging.info(
-            f"[CENTER_MATCH] Locality-first: único centro en '{localidad}' -> '{name}'"
-        )
         return _with_center_match_metadata(locality_subset[name], "locality_first", 100)
 
     norm_search = _expand_ocr_abbreviations(search_term)
@@ -1936,7 +1568,7 @@ def _search_centers_by_locality(
 
     def locality_first_rank(name: str) -> Tuple[float, int, float, float]:
         """Puntúa candidatos de una misma localidad evitando matches por tokens genéricos."""
-        norm_name = _expand_ocr_abbreviations(name)
+        norm_name = _expand_ocr_abbreviations(_center_norm(name))
         search_tokens = set(norm_search.split()) - stop_tokens
         name_tokens = set(norm_name.split()) - stop_tokens
         overlap = search_tokens & name_tokens
@@ -1950,10 +1582,6 @@ def _search_centers_by_locality(
 
     match_name = max(locality_subset.keys(), key=locality_first_rank)
     score, overlap_weight, ratio, _ = locality_first_rank(match_name)
-    logging.info(
-        f"[CENTER_MATCH] Locality-first: '{search_term}' -> '{match_name}' "
-        f"(Score: {score:.1f}, overlap={overlap_weight}, ratio={ratio:.1f}, localidad: '{localidad}')"
-    )
     return _with_center_match_metadata(locality_subset[match_name], "locality_first", score)
 
 
@@ -1978,14 +1606,13 @@ def _search_center_in_province(
     if not norm_input:
         return None
 
-    normalized_map: List[Tuple[str, str]] = []
-    for name in subset_centers.keys():
-        normalized_map.append((name, _normalize_center_text(name)))
+    normalized_map = GlobalDataManager.centros_normalized_by_provincia.get(prov_key, [])
+    if not normalized_map:
+        normalized_map = [(name, _normalize_center_text(name)) for name in subset_centers.keys()]
 
     for original_name, norm_name in normalized_map:
         if norm_name == norm_input:
             center_data = subset_centers[original_name]
-            logging.info(f"[CENTER_MATCH] Exact match: '{search_term}' -> '{original_name}'")
             return _with_center_match_metadata(center_data, "exact_normalized", 100)
 
     contains_candidates: List[str] = []
@@ -2001,19 +1628,12 @@ def _search_center_in_province(
         best_name = _pick_best_by_localidad(contains_candidates, localidad or "", search_term)
         if best_name:
             center_data = subset_centers[best_name]
-            logging.info(
-                f"[CENTER_MATCH] Contains match: '{search_term}' -> '{best_name}'"
-                + (f" (localidad: {localidad})" if localidad else "")
-            )
             return _with_center_match_metadata(center_data, "contains", 100)
         if localidad:
             chosen = _pick_best_by_combined_score(contains_candidates, search_term, localidad)
             if not chosen:
                 chosen = contains_candidates[0]
             center_data = subset_centers[chosen]
-            logging.warning(
-                f"[CENTER_MATCH] Fallback contains por descarte (sin match localidad): '{search_term}' -> '{chosen}'"
-            )
             return _with_center_match_metadata(center_data, "contains", 100)
 
     if localidad:
@@ -2033,13 +1653,13 @@ def _search_center_in_province(
         return None
 
     match_name, score, _ = results[0]
-    norm_match = _normalize_center_text(match_name)
+    norm_match = _center_norm(match_name)
 
     if norm_match == prov_key and norm_input != norm_match:
-        alt = next((r for r in results if _normalize_center_text(r[0]) != prov_key), None)
+        alt = next((r for r in results if _center_norm(r[0]) != prov_key), None)
         if alt:
             match_name, score, _ = alt
-            norm_match = _normalize_center_text(match_name)
+            norm_match = _center_norm(match_name)
         else:
             return None
 
@@ -2050,19 +1670,12 @@ def _search_center_in_province(
             best_name = _pick_best_by_localidad(candidates, localidad, search_term)
             if best_name:
                 match_name = best_name
-                logging.info(
-                    f"[CENTER_MATCH] Fuzzy+localidad: '{search_term}' -> '{match_name}' (Score: {score})"
-                )
             else:
                 top_candidates = [r[0] for r in results[:5]]
                 match_name = _pick_best_by_combined_score(top_candidates, search_term, localidad) or results[0][0]
-                logging.warning(
-                    f"[CENTER_MATCH] Fallback fuzzy por descarte (sin match localidad): '{search_term}' -> '{match_name}' (Score: {score})"
-                )
 
     score = next((r[1] for r in results if r[0] == match_name), score)
     center_data = subset_centers[match_name]
-    logging.info(f"[CENTER_MATCH] Fuzzy match: '{search_term}' -> '{match_name}' (Score: {score})")
     return _with_center_match_metadata(center_data, "fuzzy_global", score)
 
 
@@ -2074,28 +1687,21 @@ def analyze_center_optimized(provincia: str, localidad: str, nombre_centro: str)
     Siempre devuelve el mejor match encontrado en la provincia, sin umbral mínimo.
     """
     if not nombre_centro:
-        logging.info("[CENTER_SEARCH] Nombre de centro vacío, omitiendo búsqueda")
         return {}
 
     GlobalDataManager.load()
 
     prov_key = _find_province_key(provincia)
-    logging.info(f"[CENTER_SEARCH] Buscando: '{nombre_centro}' en provincia '{provincia}' (key: {prov_key or 'N/A'}), localidad: '{localidad or 'N/A'}'")
 
     if not prov_key:
-        logging.warning(f"[CENTER_SEARCH] Provincia '{provincia}' no reconocida")
         return {}
 
     centros_en_provincia = len(GlobalDataManager.centros_by_provincia.get(prov_key, {}))
-    logging.debug(f"[CENTER_SEARCH] {centros_en_provincia} centros cargados en {prov_key}")
 
     localidad_corregida = _normalize_localidad_input(localidad, provincia) if localidad else ""
-    if localidad and localidad_corregida != localidad:
-        logging.info(f"[CENTER_SEARCH] Localidad corregida: '{localidad}' -> '{localidad_corregida}'")
 
     result = _search_center_in_province(nombre_centro, prov_key, localidad_corregida)
     if result:
-        logging.info(f"[CENTER_SEARCH] ✓ Centro encontrado: '{result.get('Name', '')}' (ID: {result.get('Id', '')})")
         return result
 
     subset_centers = GlobalDataManager.centros_by_provincia.get(prov_key, {})
@@ -2114,12 +1720,8 @@ def analyze_center_optimized(provincia: str, localidad: str, nombre_centro: str)
                 localidad_corregida or localidad or "",
             ) or fallback_results[0][0]
             fallback_score = next((r[1] for r in fallback_results if r[0] == fallback_name), fallback_results[0][1])
-            logging.warning(
-                f"[CENTER_SEARCH] Fallback final por descarte: '{nombre_centro}' -> '{fallback_name}' (Score: {fallback_score})"
-            )
             return _with_center_match_metadata(subset_centers[fallback_name], "fallback_wratio", fallback_score)
 
-    logging.warning(f"[CENTER_SEARCH] ✗ Centro NO encontrado: '{nombre_centro}' en {prov_key}")
     return {}
 
 # ————————————————————————————————————————————————————————————————————————————
@@ -2318,12 +1920,7 @@ def _build_checkbox_summary(ocr_structured: Dict[str, Any], image_index: int) ->
     selected_from_ocr = _extract_selected_from_ocr(ocr_text, selection_marks=all_marks)
 
     if not selected_from_ocr:
-        logging.info(f"[CHECKBOX_SUMMARY] Imagen {image_index + 1}: sin checkboxes marcados")
         return ""
-
-    logging.info(f"[CHECKBOX_SUMMARY] Imagen {image_index + 1}: {len(selected_from_ocr)} checkbox(es) marcado(s):")
-    for t in selected_from_ocr:
-        logging.info(f"[CHECKBOX_SUMMARY]   • {t}")
 
     summary_lines = [f"\nCHECKBOXES MARCADOS - IMAGEN {image_index + 1}:"]
     for idx, text in enumerate(selected_from_ocr, 1):
@@ -2359,18 +1956,13 @@ def _build_messages_content(
             f"{checkbox_summary}"
         )
         
-        logging.info(f"[GPT_INPUT_DEBUG] Parte OCR imagen {i+1} ({side_label}): {len(text_to_send)} chars")
-        logging.debug(
-            f"[GPT_INPUT_DEBUG] Contenido OCR imagen {i+1}:\n"
-            f"{text_to_send[:3000]}{'...[truncado en log]' if len(text_to_send) > 3000 else ''}\n"
-        )
 
         content_parts.append({
             "type": "input_text",
             "text": text_to_send
         })
 
-        if i == 0 and DI_ADDON_KEY_VALUE_PAIRS:
+        if i == 0:
             kvp_list = ocr_structured.get("key_value_pairs", [])
             if kvp_list:
                 kvp_lines = ["--- KEY-VALUE PAIRS (Front side) ---"]
@@ -2380,13 +1972,10 @@ def _build_messages_content(
                         kvp_lines.append(f"{kv['key']}: {kv['value']}{conf_str}")
                 kvp_lines.append("--- END KEY-VALUE PAIRS ---")
                 kvp_text = "\n".join(kvp_lines) + "\n"
-                logging.info(f"[KEY_VALUE_PAIRS] Sección KVP enviada a GPT ({len(kvp_list)} pares):\n{kvp_text.strip()}")
                 content_parts.append({
                     "type": "input_text",
                     "text": kvp_text
                 })
-            else:
-                logging.info("[KEY_VALUE_PAIRS] Azure DI no detectó key-value pairs en el anverso")
 
     if low_confidence_words:
         high_tier = [w for w in low_confidence_words if w["confidence"] < WORD_CONFIDENCE_HIGH_CUTOFF]
@@ -2402,11 +1991,6 @@ def _build_messages_content(
                 lines.append(f"  • \"{w['word']}\" ({w['confidence']:.1%})")
         lines.append("--- END OCR UNCERTAINTY ---")
         confidence_section = "\n".join(lines) + "\n"
-        logging.info(
-            f"[GPT_INPUT_DEBUG] Sección incertidumbre OCR — "
-            f"{len(low_confidence_words)} palabras ({len(high_tier)} HIGH, {len(medium_tier)} MEDIUM):\n"
-            f"{confidence_section}"
-        )
         content_parts.append({
             "type": "input_text",
             "text": confidence_section
@@ -2426,16 +2010,10 @@ def _build_messages_content(
         )
     })
 
-    for idx_part, part in enumerate(content_parts):
-        if part["type"] == "input_text":
-            logging.info(f"[GPT_INPUT_DEBUG] Parte {idx_part + 1}/{len(content_parts)} (input_text): {len(part['text'])} chars")
-        else:
-            logging.info(f"[GPT_INPUT_DEBUG] Parte {idx_part + 1}/{len(content_parts)} ({part['type']})")
-
     return [{"role": "user", "content": content_parts}]
 
 
-def _parse_model_response(content: str, full_text_log: str) -> Dict[str, Any]:
+def _parse_model_response(content: str, full_ocr_text: str) -> Dict[str, Any]:
     """Extrae el JSON de la respuesta del modelo."""
     content = content.replace("```json", "").replace("```", "").strip()
 
@@ -2443,26 +2021,21 @@ def _parse_model_response(content: str, full_text_log: str) -> Dict[str, Any]:
     end = content.rfind('}')
 
     if start == -1 or end == -1:
-        logging.warning("[PARSE_RESPONSE] No se encontró JSON válido en la respuesta del modelo")
-        logging.warning(f"[PARSE_RESPONSE] Contenido recibido: {content[:300]}")
-        return {"ocr_text": full_text_log}
+        return {"ocr_text": full_ocr_text}
 
     try:
         json_str = content[start:end+1]
         result = json.loads(json_str)
-        result["ocr_text"] = full_text_log
+        result["ocr_text"] = full_ocr_text
 
         if "centro_origen" in result and "centro" not in result:
             result["centro"] = result["centro_origen"]
         if "apellidos" in result and "apellido" not in result:
             result["apellido"] = result["apellidos"]
 
-        logging.info(f"[PARSE_RESPONSE] JSON parseado correctamente con {len(result) - 1} campos")
         return result
-    except json.JSONDecodeError as e:
-        logging.error(f"[PARSE_RESPONSE] Error parseando JSON del modelo: {e}")
-        logging.error(f"[PARSE_RESPONSE] JSON problemático: {json_str[:500]}")
-        return {"ocr_text": full_text_log}
+    except json.JSONDecodeError:
+        return {"ocr_text": full_ocr_text}
 
 
 def _compute_word_confidence_stats(ocr_front_page: Dict[str, Any]) -> Dict[str, Any]:
@@ -2470,7 +2043,7 @@ def _compute_word_confidence_stats(ocr_front_page: Dict[str, Any]) -> Dict[str, 
     Calcula estadísticas de confianza de palabras del OCR para el anverso.
 
     Devuelve:
-    - mean_confidence, min_confidence, total_words: métricas de log
+    - mean_confidence, min_confidence, total_words: métricas de confianza
     - low_confidence_words: palabras con confianza < WORD_CONFIDENCE_THRESHOLD,
       que se enviarán a GPT para que evalúe si afectan a campos críticos y
       active review_data=true en la respuesta.
@@ -2484,7 +2057,6 @@ def _compute_word_confidence_stats(ocr_front_page: Dict[str, Any]) -> Dict[str, 
             all_words.append(word)
 
     if not all_words:
-        logging.info("[WORD_CONFIDENCE] Sin palabras para analizar")
         return {
             "mean_confidence": 0,
             "min_confidence": 0,
@@ -2514,20 +2086,6 @@ def _compute_word_confidence_stats(ocr_front_page: Dict[str, Any]) -> Dict[str, 
         if w["confidence"] < WORD_CONFIDENCE_THRESHOLD and in_manuscript(w["content"])
     ]
 
-    sep = "-" * 55
-    level = logging.WARNING if low_confidence_words else logging.INFO
-    logging.log(level, f"[WORD_CONFIDENCE] {sep}")
-    logging.log(level, f"[WORD_CONFIDENCE] Anverso — palabras de baja confianza: {len(low_confidence_words)}/{len(all_words)}")
-    logging.log(level, f"[WORD_CONFIDENCE]   Confianza media  : {mean_conf:.3f}")
-    logging.log(level, f"[WORD_CONFIDENCE]   Confianza mínima : {min_conf:.3f}")
-    logging.log(level, f"[WORD_CONFIDENCE]   Umbral aplicado  : {WORD_CONFIDENCE_THRESHOLD}")
-    if low_confidence_words:
-        logging.debug(f"[WORD_CONFIDENCE]   {'Palabra':<25} {'Confianza':>9}")
-        logging.debug(f"[WORD_CONFIDENCE]   {'─' * 25} {'─' * 9}")
-        for w in low_confidence_words:
-            logging.debug(f"[WORD_CONFIDENCE]   {w['word']:<25} {w['confidence']:>9.3f}")
-    logging.log(level, f"[WORD_CONFIDENCE] {sep}")
-
     return {
         "mean_confidence": round(mean_conf, 3),
         "min_confidence": round(min_conf, 3),
@@ -2536,22 +2094,6 @@ def _compute_word_confidence_stats(ocr_front_page: Dict[str, Any]) -> Dict[str, 
     }
 
 
-def _save_debug_snapshot(snapshot: Dict[str, Any]) -> None:
-    """Persiste un snapshot JSON de diagnóstico solo si SAVE_DEBUG_SNAPSHOT está activo."""
-    if not SAVE_DEBUG_SNAPSHOT:
-        logging.info("[DEBUG_SNAPSHOT] Desactivado (SAVE_DEBUG_SNAPSHOT no activo)")
-        return
-    try:
-        os.makedirs(DEBUG_DIR, exist_ok=True)
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
-        nombre_raw = snapshot.get("nombre_imagen", "unknown")
-        nombre_safe = re.sub(r"[^\w.-]", "_", nombre_raw)
-        filepath = os.path.join(DEBUG_DIR, f"{ts}_{nombre_safe}.json")
-        with open(filepath, "w", encoding="utf-8") as fh:
-            json.dump(snapshot, fh, ensure_ascii=False, indent=2)
-        logging.info(f"[DEBUG_SNAPSHOT] Guardado: {os.path.relpath(filepath, PROJECT_ROOT)}")
-    except Exception as exc:
-        logging.warning(f"[DEBUG_SNAPSHOT] No se pudo guardar el snapshot: {exc}")
 
 
 def analyze_images_with_gpt(
@@ -2567,103 +2109,33 @@ def analyze_images_with_gpt(
     3. Envío de OCR + palabras de baja confianza + contexto a GPT
     4. GPT extrae campos y evalúa si la ficha necesita revisión
     """
-    total_start = time.perf_counter()
     ocr_results = []
-    full_text_log = ""
-    _snapshot: Dict[str, Any] = {
-        "nombre_imagen": "",
-        "prompt_usuario": prompt_usuario,
-        "timestamp": datetime.now().isoformat(),
-        "ocr_pages": [],
-        "low_confidence_words": [],
-        "system_prompt": "",
-        "messages_text_parts": [],
-        "gpt_response_raw": "",
-        "gpt_parsed_fields": {},
-        "crm_result": None,
-        "timing_ms": {},
-        "error": None,
-    }
+    full_ocr_text = ""
 
-    for idx, img_bytes in enumerate(images_bytes_list):
-        logging.info(f"[GPT_ANALYZE] Procesando OCR imagen {idx + 1}/{len(images_bytes_list)} ({len(img_bytes)} bytes)...")
-        is_reverso = (idx == 1)
-        ocr_structured = perform_ocr_structured(
-            img_bytes,
-            high_resolution=is_reverso and DI_ADDON_HIGH_RESOLUTION,
-            query_fields=DI_QUERY_FIELDS_FRONT if (not is_reverso and DI_ADDON_QUERY_FIELDS) else None,
-            image_index=idx,
-        )
-        ocr_results.append(ocr_structured)
+    with ThreadPoolExecutor(max_workers=min(2, len(images_bytes_list) or 1)) as executor:
+        ocr_results = list(executor.map(perform_ocr_structured, images_bytes_list))
 
+    for idx, ocr_structured in enumerate(ocr_results):
         ocr_text = ocr_structured.get("text", "")
-        full_text_log += f"\n--- OCR PÁGINA {idx + 1} ---\n{ocr_text}\n"
-        _snapshot["ocr_pages"].append({
-            "page": idx + 1,
-            "side": "anverso" if idx == 0 else "reverso",
-            "chars": len(ocr_text),
-            "text": ocr_text,
-            "has_handwritten": ocr_structured.get("has_handwritten", False),
-            "num_selection_marks": len(ocr_structured.get("selection_marks", [])),
-            "kvp_count": len(ocr_structured.get("key_value_pairs", [])),
-        })
-        marks_total = len(ocr_structured.get("selection_marks", []))
-        marks_selected = sum(1 for m in ocr_structured.get("selection_marks", []) if m.get("state") == "selected")
-        logging.info(
-            f"[GPT_ANALYZE] OCR imagen {idx + 1}: {len(ocr_text)} chars, "
-            f"manuscrito={ocr_structured.get('has_handwritten', False)}, "
-            f"selection_marks={marks_selected}/{marks_total} seleccionadas, "
-            f"kvp={ocr_structured.get('kvp_count', len(ocr_structured.get('key_value_pairs', [])))}"
-        )
-        logging.info(f"[GPT_ANALYZE] OCR imagen {idx + 1}: texto completo disponible en snapshot si se activa")
-        logging.debug(
-            f"[GPT_ANALYZE] OCR imagen {idx + 1} preview:\n"
-            f"{ocr_text[:2500]}{'...[truncado en log]' if len(ocr_text) > 2500 else ''}"
-        )
+        full_ocr_text += f"\n--- OCR PÁGINA {idx + 1} ---\n{ocr_text}\n"
 
     low_confidence_words = []
     if ocr_results:
         confidence_stats = _compute_word_confidence_stats(ocr_results[0])
         low_confidence_words = confidence_stats.get("low_confidence_words", [])
 
-    barcodes_data: Dict[str, Any] = {}
-    if len(ocr_results) > 1:
-        reverso_barcodes = ocr_results[1].get("barcodes", [])
-        if reverso_barcodes:
-            barcodes_data = _process_barcodes(reverso_barcodes)
-
     kvp_confidence: Dict[str, float] = {}
-    if ocr_results and DI_ADDON_KEY_VALUE_PAIRS:
-        kvp_canonicos = _extract_from_key_value_pairs(ocr_results[0].get("key_value_pairs", []))
+    if ocr_results:
         kvp_confidence = _extract_kvp_confidence(ocr_results[0].get("key_value_pairs", []))
-        if kvp_canonicos:
-            logging.info(f"[KEY_VALUE_PAIRS] Campos canónicos detectados por Azure DI: {kvp_canonicos}")
-        else:
-            logging.info("[KEY_VALUE_PAIRS] No se pudieron mapear campos canónicos de los KVP")
 
-    _snapshot["low_confidence_words"] = low_confidence_words
-
-    logging.info(f"[GPT_ANALYZE] Construyendo mensajes para GPT...")
     messages_content = _build_messages_content(
         ocr_results, prompt_usuario,
         low_confidence_words=low_confidence_words
     )
     system_prompt = _build_system_prompt()
-    _snapshot["system_prompt"] = system_prompt
-    _snapshot["messages_text_parts"] = [
-        {"type": p["type"], "text": p.get("text", "[IMAGE_OMITTED]")}
-        for p in messages_content[0]["content"]
-    ]
-    total_input_chars = sum(len(p.get("text", "")) for p in messages_content[0]["content"])
-    logging.info(
-        f"[GPT_ANALYZE] System prompt: {len(system_prompt)} chars. "
-        f"Input construido: {len(messages_content[0]['content'])} partes, {total_input_chars} chars totales"
-    )
 
     try:
         client = get_openai_client()
-        logging.info(f"[GPT_ANALYZE] Enviando a GPT ({OPENAI_DEPLOYMENT_NAME}), reasoning={GPT_REASONING_EFFORT}, max_tokens={GPT_MAX_OUTPUT_TOKENS}...")
-        gpt_start = time.perf_counter()
         response = client.responses.create(
             model=OPENAI_DEPLOYMENT_NAME,
             instructions=system_prompt,
@@ -2674,33 +2146,14 @@ def analyze_images_with_gpt(
         )
 
         content = response.output_text or ""
-        gpt_elapsed_ms = round((time.perf_counter() - gpt_start) * 1000, 2)
-        total_elapsed_ms = round((time.perf_counter() - total_start) * 1000, 2)
-        logging.info(f"[GPT_ANALYZE] Respuesta GPT recibida: {len(content)} chars en {gpt_elapsed_ms} ms (total pipeline: {total_elapsed_ms} ms)")
-        logging.debug(f"[GPT_ANALYZE] Respuesta GPT raw:\n{content}")
-        parsed = _parse_model_response(content, full_text_log)
-        if barcodes_data:
-            parsed["_barcodes_data"] = barcodes_data
+        parsed = _parse_model_response(content, full_ocr_text)
         parsed["_low_confidence_words"] = low_confidence_words
         parsed["_kvp_confidence"] = kvp_confidence
 
-        campos_gpt = {k: v for k, v in parsed.items() if k not in ('ocr_text', '_barcodes_data', '_low_confidence_words')}
-        logging.info(f"[GPT_ANALYZE] Campos extraídos por GPT ({len(campos_gpt)}):")
-        for k, v in campos_gpt.items():
-            valor_str = str(v)[:200] if v else '(vacío)'
-            logging.info(f"[GPT_ANALYZE]   {k}: {valor_str}")
-
-        _snapshot["timing_ms"] = {"gpt": gpt_elapsed_ms, "total_pipeline": total_elapsed_ms}
-        _snapshot["gpt_response_raw"] = content
-        _snapshot["gpt_parsed_fields"] = {k: v for k, v in campos_gpt.items()}
-        parsed["_debug_snapshot"] = _snapshot
         return parsed
 
     except Exception as e:
-        logging.error(f"[GPT] Error en llamada a OpenAI: {e}", exc_info=True)
-        _snapshot["error"] = str(e)
-        result = {"ocr_text": full_text_log, "_debug_snapshot": _snapshot}
-        return result
+        return {"ocr_text": full_ocr_text}
 
 # ————————————————————————————————————————————————————————————————————————————
 # EXTRACCIÓN Y TRANSFORMACIÓN DE DATOS
@@ -2727,7 +2180,6 @@ def _extract_basic_fields(datos: Dict[str, Any]) -> Dict[str, Any]:
     de revisión.
     """
     nombre_raw = clean_text(datos.get("nombre", ""))
-    logging.info(f"[EXTRAER_DATOS] Nombre (GPT): '{nombre_raw}'")
 
     telefono_raw_str = clean_text(datos.get("telefono", ""))
     _tel_check = re.sub(r'[\s\-\.\+\(\)]', '', telefono_raw_str.upper())
@@ -2735,12 +2187,9 @@ def _extract_basic_fields(datos: Dict[str, Any]) -> Dict[str, Any]:
     telefono = _normalize_phone(telefono_raw_str)
 
     apellidos_raw = datos.get("apellido", "") or datos.get("apellidos", "")
-    logging.info(f"[EXTRAER_DATOS] Apellidos (GPT): '{apellidos_raw}'")
     middlename, lastname = _split_apellidos(apellidos_raw)
-    logging.info(f"[EXTRAER_DATOS] Split apellidos: middlename='{middlename}', lastname='{lastname}'")
 
     provincia_usuario = clean_text(datos.get("provincia", ""))
-    logging.info(f"[EXTRAER_DATOS] Provincia: '{provincia_usuario}'")
 
     dni_raw = clean_text(datos.get("dni", ""))
     dni_normalizado = _normalize_dni_nie(dni_raw)
@@ -2766,7 +2215,7 @@ def _extract_basic_fields(datos: Dict[str, Any]) -> Dict[str, Any]:
             _expected_letter = _DNI_LETTERS[int(_num_calc) % 23]
             _dni_letter_mismatch = (_norm_last.upper() != _expected_letter)
         except (ValueError, IndexError):
-            pass
+            _dni_letter_mismatch = False
 
     dni_letter_corrected = _raw_last_was_nonalpha or _dni_letter_mismatch
     if dni_letter_corrected:
@@ -2775,7 +2224,6 @@ def _extract_basic_fields(datos: Dict[str, Any]) -> Dict[str, Any]:
             if _raw_last_was_nonalpha
             else f"letra '{_norm_last}' ≠ letra esperada por módulo 23"
         )
-        logging.warning(f"[DNI_NORMALIZE] DNI requerirá revisión: {_reason}")
 
     email_raw = datos.get("email", "")
     email_raw_clean = str(email_raw).replace(" ", "") if email_raw else ""
@@ -2825,18 +2273,14 @@ def _extract_degrees_fields(
     cuando entra en conflicto con las titulaciones marcadas en checkboxes.
     """
     titulaciones_checkbox = datos.get("titulaciones_marcadas_checkbox", [])
-    logging.info(f"[EXTRAER_DATOS] Titulaciones checkbox (GPT): {titulaciones_checkbox}")
     degrees_array = map_checked_degrees(titulaciones_checkbox, provincia_usuario)
 
     nombre_titulacion_manuscrita = clean_text(
         datos.get("titulacion_manuscrita", "") or datos.get("titulacion_seleccionada", "")
     )
-    logging.info(f"[EXTRAER_DATOS] Titulación manuscrita (GPT): '{nombre_titulacion_manuscrita}'")
     id_study_manuscrito = analyze_titulacion_local(nombre_titulacion_manuscrita, provincia_usuario)
-    logging.info(f"[EXTRAER_DATOS] ID titulación manuscrita: '{id_study_manuscrito}'")
 
     if not id_study_manuscrito and nombre_titulacion_manuscrita and degrees_array:
-        logging.info("[EXTRAER_DATOS] Titulación manuscrita sin match directo, buscando en degrees_array...")
         GlobalDataManager.load()
         titulacion_normalizada = _normalize_titulacion_input(nombre_titulacion_manuscrita)
 
@@ -2859,21 +2303,13 @@ def _extract_degrees_fields(
 
         if best_match_id and best_match_score >= 50:
             id_study_manuscrito = best_match_id
-            logging.info(f"[EXTRAER_DATOS] Titulación manuscrita correlacionada con degree: ID={best_match_id} (Score: {best_match_score})")
-        else:
-            logging.info(f"[EXTRAER_DATOS] No se pudo correlacionar titulación manuscrita (mejor score: {best_match_score})")
 
     titulacion_needs_review = False
     if nombre_titulacion_manuscrita:
         if not id_study_manuscrito:
             titulacion_needs_review = True
-            logging.warning("[EXTRAER_DATOS] Titulación manuscrita sin match en catálogo → revisión necesaria")
         elif degrees_array and id_study_manuscrito not in degrees_array:
             titulacion_needs_review = True
-            logging.warning(
-                f"[EXTRAER_DATOS] Conflicto titulación: manuscrita (ID={id_study_manuscrito}) "
-                f"no coincide con checkboxes marcados → revisión necesaria"
-            )
 
     if degrees_array:
         if id_study_manuscrito and id_study_manuscrito not in degrees_array:
@@ -2884,11 +2320,9 @@ def _extract_degrees_fields(
 
         final_degrees: Optional[List[Dict[str, str]]] = [{"IdStudy": degree_id} for degree_id in degrees_array]
         final_id_study: Optional[str] = None
-        logging.info(f"[EXTRAER_DATOS] Degrees finales: {final_degrees}")
     else:
         final_id_study = id_study_manuscrito if id_study_manuscrito else ""
         final_degrees = None
-        logging.info(f"[EXTRAER_DATOS] IdStudy final (sin checkbox): '{final_id_study}'")
 
     return {
         "final_degrees": final_degrees,
@@ -2908,7 +2342,6 @@ def _extract_center_fields(
     """
     localidad = clean_text(datos.get("localidad_centro", "") or datos.get("localidad", ""))
     nombre_centro = clean_text(datos.get("centro", "") or datos.get("centro_origen", ""))
-    logging.info(f"[EXTRAER_DATOS] Centro: '{nombre_centro}', Localidad: '{localidad}', Provincia: '{provincia}'")
 
     json_centro = analyze_center_optimized(provincia, localidad, nombre_centro)
 
@@ -3078,46 +2511,26 @@ def _build_crm_record(
     else:
         result_data["IdStudy"] = final_id_study
 
-    barcodes_data = datos.get("_barcodes_data") or {}
-    dni_qr = barcodes_data.get("dni_qr", "")
-    if dni_qr and dni_normalizado and dni_qr != dni_normalizado:
-        logging.warning(
-            f"[QR_BARCODE] Discrepancia DNI: OCR/GPT='{dni_normalizado}' vs QR='{dni_qr}' → flag DNI"
-        )
-
     _extra_review_fields = []
-    if dni_qr and dni_normalizado and dni_qr != dni_normalizado:
-        _extra_review_fields.append("DNI")
     if basic.get("dni_letter_corrected") and "DNI" not in _extra_review_fields:
         _extra_review_fields.append("DNI")
-        logging.warning(
-            "[EXTRAER_DATOS] Letra de control DNI corregida automáticamente (módulo 23) → flag DNI"
-        )
     if titulacion_needs_review:
         _extra_review_fields.append("Titulación")
     if telefono_had_corrections:
         _extra_review_fields.append("Teléfono")
     elif telefono and len(telefono) == 9 and telefono[0] not in "6789":
-        logging.warning(
-            f"[EXTRAER_DATOS] Teléfono con formato español inválido: '{telefono}' "
-            f"(empieza por '{telefono[0]}', debe empezar por 6/7/8/9) -> flag Teléfono"
-        )
         _extra_review_fields.append("Teléfono")
     email_reason = _email_review_reason(email, low_confidence_words, email_had_accents)
     center_reason = _center_review_reason(nombre_centro, json_centro)
     if email_reason:
         _extra_review_fields.append("Email")
-        logging.warning(f"[EXTRAER_DATOS] Email requiere revisión: {email_reason}")
     if center_reason:
         _extra_review_fields.append("Centro")
-        logging.warning(f"[EXTRAER_DATOS] Centro requiere revisión: {center_reason}")
 
     _fields_set = _parse_review_fields(result_data["FieldsToReview"])
     for field in _extra_review_fields:
         if field not in _fields_set:
             _fields_set.append(field)
-    if _extra_review_fields:
-        logging.warning(f"[EXTRAER_DATOS] Flags adicionales (código): {_extra_review_fields}")
     _KVP_CONF_NO_PROPAGATE = 0.90
     _kvp_conf = datos.get("_kvp_confidence", {})
     if "Nombre" in _fields_set or "Apellidos" in _fields_set:
@@ -3125,56 +2538,18 @@ def _build_crm_record(
             nombre_conf = _kvp_conf.get("nombre", 0.0)
             if nombre_conf < _KVP_CONF_NO_PROPAGATE:
                 _fields_set.append("Nombre")
-                logging.warning("[EXTRAER_DATOS] Apellidos flaggeado → añadiendo Nombre automáticamente")
-            else:
-                logging.info(f"[EXTRAER_DATOS] Apellidos flaggeado pero Nombre KVP={nombre_conf:.0%} → no se propaga")
         if "Apellidos" not in _fields_set:
             apellido_conf = _kvp_conf.get("apellido", 0.0)
             if apellido_conf < _KVP_CONF_NO_PROPAGATE:
                 _fields_set.append("Apellidos")
-                logging.warning("[EXTRAER_DATOS] Nombre flaggeado → añadiendo Apellidos automáticamente")
-            else:
-                logging.info(f"[EXTRAER_DATOS] Nombre flaggeado pero Apellidos KVP={apellido_conf:.0%} → no se propaga")
     if "Email" in _fields_set and not email_reason:
         _fields_set.remove("Email")
-        logging.info("[EXTRAER_DATOS] Email retirado de revisión: estructura válida y sin evidencia HIGH propia")
     if "Centro" in _fields_set and not center_reason:
         _fields_set.remove("Centro")
         strategy = json_centro.get("_match_strategy", "") if json_centro else ""
         score = json_centro.get("_match_score", "") if json_centro else ""
-        logging.info(
-            f"[EXTRAER_DATOS] Centro retirado de revisión: match CRM suficiente "
-            f"(estrategia={strategy or 'N/A'}, score={score or 'N/A'})"
-        )
 
     _write_review_fields(result_data, _fields_set)
-
-    logging.info("[EXTRAER_DATOS] Validación estricta de campos obligatorios desactivada")
-
-    logging.info("[EXTRAER_DATOS] ====== RESUMEN CRM ======")
-    logging.info(f"[EXTRAER_DATOS]   DNI: '{dni_normalizado}'")
-    logging.info(f"[EXTRAER_DATOS]   Firstname: '{firstname}'")
-    logging.info(f"[EXTRAER_DATOS]   Middlename: '{middlename}'")
-    logging.info(f"[EXTRAER_DATOS]   Lastname: '{lastname}'")
-    logging.info(f"[EXTRAER_DATOS]   Mobilephone: '{mobilephone}'")
-    logging.info(f"[EXTRAER_DATOS]   Email: '{email}'")
-    logging.info(f"[EXTRAER_DATOS]   Centro: '{result_data.get('ProvenanceCenterName', result_data.get('OtherCenter', ''))}'")
-    logging.info(f"[EXTRAER_DATOS]   Curso: '{course_id}'")
-    logging.info(f"[EXTRAER_DATOS]   RequestType: {result_data['RequestType']}")
-    if final_degrees is not None:
-        logging.info(f"[EXTRAER_DATOS]   Degrees: {len(final_degrees)} titulaciones")
-    else:
-        logging.info(f"[EXTRAER_DATOS]   IdStudy: '{final_id_study}'")
-    review_flag = result_data.get("ReviewData", False)
-    fields_flag = result_data.get("FieldsToReview", "")
-    logging.log(
-        logging.WARNING if review_flag else logging.INFO,
-        f"[EXTRAER_DATOS]   ReviewData: {review_flag}"
-        f"{' ⚠ REQUIERE REVISIÓN HUMANA' if review_flag else ' ✓'}"
-    )
-    if review_flag and fields_flag:
-        logging.warning(f"[EXTRAER_DATOS]   FieldsToReview: '{fields_flag}'")
-    logging.info("[EXTRAER_DATOS] ====== FIN TRANSFORMACIÓN CRM ======")
 
     return result_data
 
@@ -3192,19 +2567,16 @@ def extraer_datos(datos: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     try:
         GlobalDataManager.load()
-        logging.info("[EXTRAER_DATOS] ====== INICIO TRANSFORMACIÓN CRM ======")
 
         basic = _extract_basic_fields(datos)
         degrees = _extract_degrees_fields(datos, basic["provincia"])
         center = _extract_center_fields(datos, basic["provincia"])
         course_id = _extract_course_id(datos)
-        logging.info(f"[EXTRAER_DATOS] Curso ID: '{course_id}'")
 
         result_data = _build_crm_record(basic, center, degrees, course_id, datos)
         return [result_data]
 
     except Exception as e:
-        logging.error(f"[EXTRAER_DATOS] Error en transformación: {e}", exc_info=True)
         raise ValueError(f"Error procesando datos: {str(e)}") from e
 
 # ————————————————————————————————————————————————————————————————————————————
@@ -3240,18 +2612,16 @@ def _download_blob_pair(nombre_par: str, nombre_impar: str) -> Tuple[bytes, byte
     """
     blob_service = BlobServiceClient.from_connection_string(AZURE_STORAGE_CONN_STR)
 
-    blob_impar = blob_service.get_blob_client(
-        BLOB_CONTAINER_NAME, nombre_impar
-    ).download_blob().readall()
+    def download_and_rotate(blob_name: str, rotation_degrees: int) -> bytes:
+        blob_bytes = blob_service.get_blob_client(
+            BLOB_CONTAINER_NAME, blob_name
+        ).download_blob().readall()
+        return rotate_image_if_needed(blob_bytes, rotation_degrees=rotation_degrees)
 
-    blob_par = blob_service.get_blob_client(
-        BLOB_CONTAINER_NAME, nombre_par
-    ).download_blob().readall()
-
-    blob_impar_rotated = rotate_image_if_needed(blob_impar, rotation_degrees=90)
-    blob_par_rotated = rotate_image_if_needed(blob_par, rotation_degrees=270)
-
-    return blob_impar_rotated, blob_par_rotated
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        future_impar = executor.submit(download_and_rotate, nombre_impar, 90)
+        future_par = executor.submit(download_and_rotate, nombre_par, 270)
+        return future_impar.result(), future_par.result()
 
 
 def _process_image_pair(nombre_imagen: str, prompt: str) -> func.HttpResponse:
@@ -3259,35 +2629,19 @@ def _process_image_pair(nombre_imagen: str, prompt: str) -> func.HttpResponse:
     Procesa un par de imágenes (anverso y reverso) del formulario.
     Solo procesa cuando el número de imagen es par.
     """
-    nombre_par = None
-    nombre_impar = None
-    res_ai = None
     try:
         GlobalDataManager.load()
 
         num_img, nombre_par, nombre_impar = _parse_image_number(nombre_imagen)
-        logging.info(f"[PROCESS_PAIR] Imagen #{num_img}: par={nombre_par}, impar={nombre_impar}")
 
         if num_img % 2 != 0:
-            logging.info(f"[PROCESS_PAIR] Imagen #{num_img} es impar, esperando par")
             return func.HttpResponse("Esperando par", status_code=202)
 
-        logging.info(f"[PROCESS_PAIR] Descargando blobs desde container '{BLOB_CONTAINER_NAME}'...")
         blob_impar, blob_par = _download_blob_pair(nombre_par, nombre_impar)
-        logging.info(f"[PROCESS_PAIR] Blobs descargados: impar={len(blob_impar)} bytes, par={len(blob_par)} bytes")
 
-        logging.info(f"[PROCESS_PAIR] Iniciando análisis GPT...")
         res_ai = analyze_images_with_gpt([blob_impar, blob_par], prompt)
-        _snapshot = res_ai.pop("_debug_snapshot", {})
-        _snapshot["nombre_imagen"] = nombre_imagen
-        logging.info(f"[PROCESS_PAIR] GPT devolvió {len(res_ai)} campos")
 
-        logging.info(f"[PROCESS_PAIR] Transformando datos para CRM...")
         final_result = extraer_datos(res_ai)
-        _snapshot["crm_result"] = final_result
-        _save_debug_snapshot(_snapshot)
-        logging.info(f"[PROCESS_PAIR] ====== RESULTADO FINAL ======")
-        logging.info(f"[PROCESS_PAIR] {json.dumps(final_result, ensure_ascii=False, indent=2)}")
 
         return func.HttpResponse(
             json.dumps(final_result, ensure_ascii=False),
@@ -3296,10 +2650,8 @@ def _process_image_pair(nombre_imagen: str, prompt: str) -> func.HttpResponse:
         )
 
     except ValueError as e:
-        logging.error(f"[PROCESS_PAIR] ValueError: {e}", exc_info=True)
         return func.HttpResponse(str(e), status_code=400)
     except Exception as e:
-        logging.error(f"[PROCESS_PAIR] Error interno: {e}", exc_info=True)
         return func.HttpResponse(f"Error interno: {e}", status_code=500)
 
 
@@ -3308,22 +2660,16 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
     try:
         req_body = req.get_json()
         if not req_body:
-            logging.warning("[MAIN] Cuerpo de solicitud vacío o no es JSON")
             return func.HttpResponse("Cuerpo de solicitud inválido", status_code=400)
 
         nombre_imagen = req_body.get("nombre_imagen")
         prompt = req_body.get("prompt")
 
-        logging.info(f"[MAIN] ====== NUEVA PETICIÓN ======")
-        logging.info(f"[MAIN] Imagen: {nombre_imagen}")
-        logging.info(f"[MAIN] Prompt: {prompt[:100] if prompt else '(vacío)'}...")
 
         if not nombre_imagen or not prompt:
-            logging.warning("[MAIN] Faltan campos obligatorios: nombre_imagen=%s, prompt=%s", bool(nombre_imagen), bool(prompt))
             return func.HttpResponse("Faltan campos obligatorios", status_code=400)
 
         return _process_image_pair(nombre_imagen, prompt)
 
     except Exception as e:
-        logging.error(f"[MAIN] Error no controlado: {e}", exc_info=True)
         return func.HttpResponse(f"Error: {e}", status_code=500)

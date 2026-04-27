@@ -137,28 +137,13 @@ se revisa siempre que el alumno escribió un centro no resuelto.
 
 ---
 
-## 🐛 Logs y debugging
+## Diagnóstico y depuración
 
-| Etiqueta | Qué traza |
-|---|---|
-| `[DI_EXTRACT_SUMMARY img=N]` | Resumen por imagen al finalizar OCR: texto, confianza de palabras, marcas aceptadas/rechazadas, tabla completa KVP |
-| `[OCR_STRUCTURED]` | Resultado bruto del OCR y selection marks |
-| `[KEY_VALUE_PAIRS]` | Pares etiqueta→valor del anverso enviados a GPT y mapeo canónico diagnóstico |
-| `[WORD_CONFIDENCE]` | Estadísticas de confianza por palabra |
-| `[CHECKBOX_SUMMARY]` | Lista de checkboxes marcados enviada a GPT (fuente única: `:selected:` + confianza) |
-| `[CENTER_SEARCH]` | Candidatos y scores en cada estrategia |
-| `[CENTER_MATCH]` | Centro seleccionado y puntuación final |
-| `[LOCALIDAD_NORM]` | Normalización de localidad de entrada |
-| `[TITULACION_MATCH]` | Matches de titulaciones y scores |
-| `[PHONE_NORMALIZE]` | Correcciones OCR en el teléfono |
-| `[DNI_NORMALIZE]` | Sustituciones de caracteres en el DNI |
-
-> [!TIP]
-> Para auditar casos problemáticos, filtra por `[CENTER_SEARCH]` y `[CENTER_MATCH]`
-> donde se muestran todos los candidatos con sus scores antes de la selección final.
+El flujo de extracción no emite logs de aplicación ni genera snapshots de debug. Para auditar un
+caso se reproduce localmente la función afectada con el OCR del caso y se añade un test de regresión
+antes de tocar alias, normalizadores o umbrales.
 
 ---
-
 ## 💻 Comandos locales
 
 ```powershell
@@ -178,18 +163,10 @@ python scripts/test_review_flags.py
 
 ---
 
-## 📌 Siguientes pasos
+## Mantenimiento
 
-- [x] Migración SDK Azure DI v3.1 → v4.0 (Standard tier, `azure-ai-documentintelligence`)
-- [x] Add-on Key-Value Pairs activado — pares etiqueta→valor del anverso enviados a GPT como contraste
-- [x] Logging completo por imagen (`[DI_EXTRACT_SUMMARY]`) para diagnóstico en producción
-- [x] Registrar alias puntuales (MATERDEI, COMUNITAT VALENCIANA, ALACANT, etc.) — resuelto con WRatio y alias dict
-- [ ] **Fase 2**: Activar `DI_ADDON_HIGH_RESOLUTION=True` para reverso tras validar latencia (comparar checkboxes con/sin add-on en fichas reales)
-- [ ] **Fase 3**: Activar `DI_ADDON_QUERY_FIELDS=True` (add-on de pago) para confianza por campo nativa
-- [ ] **Fase 4**: `_reconcile_review_flags()` — reducir falsos positivos/negativos con confianza DI por campo (depende Fase 3)
-- [ ] **Fase 5**: Entrenar Custom Neural Model con 50+ fichas etiquetadas en Azure DI Studio — elimina dependencia de GPT para campos básicos y da confianza por campo sin add-ons de pago
-- [ ] Añadir campo `confidence` en `result_data` indicando si el match de centro fue forzado por fallback
-- [ ] Ajustar umbrales según telemetría en producción
+- Mantener los alias de provincia/localidad y centro cubiertos por tests de regresión.
+- Regenerar catálogos si cambian los datos de CRM.
+- Ajustar umbrales solo con casos reproducibles y pruebas locales.
 
----
-> *Documento generado desde la inspección del código en `procesa_ficha/__init__.py`.*
+---> *Documento generado desde la inspección del código en `procesa_ficha/__init__.py`.*

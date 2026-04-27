@@ -57,7 +57,7 @@ https://github.com/user-attachments/assets/b708e088-e4d4-4c1e-8a98-a77cd27e07ee
 - [Checkbox detection](#checkbox-detection)
 - [Data catalogs](#data-catalogs)
 - [Tests](#tests)
-- [Logs and debugging](#logs-and-debugging)
+- [Diagnostics and debugging](#diagnostics-and-debugging)
 - [Project structure](#project-structure)
 - [Design decisions](#design-decisions)
 - [Known limitations](#known-limitations)
@@ -102,6 +102,8 @@ flowchart TD
     style G fill:#0078D4,color:#fff
     style Q fill:#107C10,color:#fff
 ```
+
+**Average processing time**: a full enrollment form (front + back) typically takes **30–40 seconds** end to end in production.
 
 ---
 
@@ -435,27 +437,20 @@ To add a full suite: create `run_new_suite_tests() -> bool`, add it to the `if _
 
 ---
 
-## Logs and debugging
+## Diagnostics and debugging
 
-Each module emits structured logs with consistent tags for easy production filtering.
+The main pipeline emits no application logs and generates no debug snapshots with personal data.
+Debugging relies on local tests and controlled reproductions using the OCR text of the failing case.
 
-| Tag | What it traces |
-|-----|----------------|
-| `[DI_EXTRACT_SUMMARY img=N]` | Per-image summary: text, confidence, accepted/rejected marks, KVP table |
-| `[OCR_STRUCTURED]` | Full OCR result, selection marks, confidence statistics |
-| `[CHECKBOX_SUMMARY]` | Final checkbox list sent to GPT |
-| `[CENTER_SEARCH]` | Strategy used, candidates and score at each step |
-| `[CENTER_MATCH]` | Selected school and final score |
-| `[GPT_ANALYZE]` | Full GPT pipeline: input, output, extracted fields, timing |
-| `[TITULACION_MATCH]` | Degree matches with scores |
-| `[LOCALIDAD_NORM]` | Normalization: input → output with score |
-| `[PROVINCE]` | Province resolution: alias, prefix, or fuzzy |
-| `[DNI_NORMALIZE]` / `[PHONE_NORMALIZE]` | OCR corrections per field |
-| `[WORD_CONFIDENCE]` | Per-word confidence statistics |
-| `[EXTRAER_DATOS]` | Full CRM transformation summary |
+<details>
+<summary>Production error debugging flow</summary>
 
-> [!TIP]
-> To audit a problematic case: filter first by `[CENTER_SEARCH]` and `[CENTER_MATCH]` for schools, or `[TITULACION_MATCH]` for degrees. Logs show all candidates with their scores before the final selection.
+1. Identify the affected field in `FieldsToReview`.
+2. Reproduce locally: run the affected function with the OCR text of the case.
+3. **Minimal fix**: alias dict for a known OCR case; new test for a new case; threshold adjustment only as a last resort.
+4. Verify with the full test suite before committing.
+
+</details>
 
 ---
 
