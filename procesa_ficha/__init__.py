@@ -902,7 +902,7 @@ def extract_course_from_text(ocr_text: str) -> str:
 
 def _extract_kvp_confidence(kvp_list: List[Dict[str, Any]]) -> Dict[str, float]:
     """
-    Devuelve la confianza KVP de Azure DI para los campos 'nombre' y 'apellido'.
+    Devuelve la confianza KVP de Azure DI para los campos 'nombre', 'apellido' y 'email'.
     Usa fuzzy matching contra las etiquetas esperadas.
     """
     _TARGETS = {"NOMBRE": "nombre", "APELLIDOS": "apellido"}
@@ -2179,14 +2179,14 @@ def _extract_basic_fields(datos: Dict[str, Any]) -> Dict[str, Any]:
     (telefono_had_corrections, email_had_accents) necesarios para el post-processing
     de revisión.
     """
-    nombre_raw = clean_text(datos.get("nombre", ""))
+    nombre_raw = re.sub(r'\s*-\s*', '-', clean_text(datos.get("nombre", ""))).title()
 
     telefono_raw_str = clean_text(datos.get("telefono", ""))
     _tel_check = re.sub(r'[\s\-\.\+\(\)]', '', telefono_raw_str.upper())
     telefono_had_corrections = bool(telefono_raw_str and any(c in OCR_LETTER_TO_DIGIT for c in _tel_check))
     telefono = _normalize_phone(telefono_raw_str)
 
-    apellidos_raw = datos.get("apellido", "") or datos.get("apellidos", "")
+    apellidos_raw = re.sub(r'\s*-\s*', '-', clean_text(datos.get("apellido", "") or datos.get("apellidos", ""))).title()
     middlename, lastname = _split_apellidos(apellidos_raw)
 
     provincia_usuario = clean_text(datos.get("provincia", ""))
@@ -2372,9 +2372,10 @@ def _email_high_uncertainty_words(
     low_confidence_words: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
     """
-    Devuelve palabras HIGH que parecen pertenecer al email normalizado.
+    Devuelve palabras con baja confianza OCR (< WORD_CONFIDENCE_THRESHOLD) que parecen
+    pertenecer al email normalizado.
 
-    Evita asociar tokens demasiado cortos como TLDs aislados porque sin posiciÃ³n
+    Evita asociar tokens demasiado cortos como TLDs aislados porque sin posición
     OCR pueden venir de otra zona del formulario.
     """
     email_key = re.sub(r"[^A-Za-z0-9]+", "", email or "").upper()
@@ -2382,8 +2383,6 @@ def _email_high_uncertainty_words(
     if not email_key:
         return matches
     for word in low_confidence_words:
-        if word.get("confidence", 1.0) >= WORD_CONFIDENCE_HIGH_CUTOFF:
-            continue
         raw_word = str(word.get("word", "") or "")
         word_key = re.sub(r"[^A-Za-z0-9]+", "", _normalize_email(raw_word)).upper()
         if not word_key:
@@ -2403,6 +2402,7 @@ def _email_review_reason(
     email: str,
     low_confidence_words: List[Dict[str, Any]],
     email_had_accents: bool,
+    kvp_email_confidence: Optional[float] = None,
 ) -> Optional[str]:
     """Indica por qué Email requiere revisión o None si no hay evidencia propia."""
     if not email:
@@ -2420,7 +2420,9 @@ def _email_review_reason(
             f"{w.get('word')} ({float(w.get('confidence', 0)):.1%})"
             for w in high_words
         )
-        return f"palabra(s) HIGH en email: {words}"
+        return f"palabra(s) con baja confianza en email: {words}"
+    if kvp_email_confidence is not None and kvp_email_confidence < WORD_CONFIDENCE_THRESHOLD:
+        return f"confianza KVP baja: {kvp_email_confidence:.0%}"
     return None
 
 
@@ -2520,7 +2522,11 @@ def _build_crm_record(
         _extra_review_fields.append("Teléfono")
     elif telefono and len(telefono) == 9 and telefono[0] not in "6789":
         _extra_review_fields.append("Teléfono")
-    email_reason = _email_review_reason(email, low_confidence_words, email_had_accents)
+    _kvp_conf = datos.get("_kvp_confidence", {})
+    email_reason = _email_review_reason(
+        email, low_confidence_words, email_had_accents,
+        kvp_email_confidence=_kvp_conf.get("email"),
+    )
     center_reason = _center_review_reason(nombre_centro, json_centro)
     if email_reason:
         _extra_review_fields.append("Email")
@@ -2532,7 +2538,6 @@ def _build_crm_record(
         if field not in _fields_set:
             _fields_set.append(field)
     _KVP_CONF_NO_PROPAGATE = 0.90
-    _kvp_conf = datos.get("_kvp_confidence", {})
     if "Nombre" in _fields_set or "Apellidos" in _fields_set:
         if "Nombre" not in _fields_set:
             nombre_conf = _kvp_conf.get("nombre", 0.0)
