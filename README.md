@@ -30,7 +30,7 @@ This repository is shared publicly as a technical reference and portfolio piece.
 ## Fake Example
 This video demonstrates the processing of a sample form with the function hosted locally. This process requires the form to have been scanned beforehand using the printer, so that the images can be downloaded from the Azure host. The video shows that scanning a form takes approximately 30–40 seconds. This should not be a cause for concern, as this process can be fully parallelised in batches. Furthermore, it is worth noting that an automated process can run continuously, day and night. Alongside the video, a sample of the fictitious handwritten form is shown.
 
-https://github.com/user-attachments/assets/3ca3bd36-34f0-485e-9dee-8dad54ec5b3f
+https://github.com/user-attachments/assets/5f6aa951-cdae-40da-b42b-23988ab09011
 
 <img width="2480" height="2840" alt="fakeDocument1" src="https://github.com/user-attachments/assets/1fcc52ea-af1c-45d9-91e3-255cf10e71d2" />
 
