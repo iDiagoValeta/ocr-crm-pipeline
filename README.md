@@ -15,6 +15,8 @@
 
 </div>
 
+> **Context.** Built in April 2026 as a professional project to digitize handwritten enrollment forms for a private Spanish university, in the same months I was working as an AI and back-end developer at Grupo CEU and finishing my Computer Engineering degree at UPV. It builds on the Azure Functions and LLM work from that job and is an early example of the tools I later built with coding agents.
+
 ---
 
 ## Why this exists
